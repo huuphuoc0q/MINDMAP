@@ -35,29 +35,23 @@ const getPath = (x1: number, y1: number, x2: number, y2: number) => {
   return `M ${x1} ${y1} C ${x1 + cx} ${y1}, ${x2 - cx} ${y2}, ${x2} ${y2}`;
 };
 
-export function Canvas() {
+export function Canvas({ mapId }: { mapId: string }) {
   // KHỞI TẠO NODES TỪ LOCAL STORAGE
   const [nodes, setNodes] = useState<MindNodeData[]>(() => {
-    const savedNodes = localStorage.getItem('mindnode_nodes');
+    // Thêm mapId vào tên key
+    const savedNodes = localStorage.getItem(`mindnode_nodes_${mapId}`); 
     if (savedNodes) {
-      try {
-        return JSON.parse(savedNodes);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu Nodes:", e);
-      }
+      try { return JSON.parse(savedNodes); } catch (e) {}
     }
-    return INITIAL_NODES; // Nếu không có dữ liệu cũ thì dùng dữ liệu mẫu
+    return INITIAL_NODES; 
   });
 
   // KHỞI TẠO CONNECTIONS TỪ LOCAL STORAGE
   const [connections, setConnections] = useState<ConnectionData[]>(() => {
-    const savedConnections = localStorage.getItem('mindnode_connections');
+    // Thêm mapId vào tên key
+    const savedConnections = localStorage.getItem(`mindnode_connections_${mapId}`); 
     if (savedConnections) {
-      try {
-        return JSON.parse(savedConnections);
-      } catch (e) {
-        console.error("Lỗi đọc dữ liệu Connections:", e);
-      }
+      try { return JSON.parse(savedConnections); } catch (e) {}
     }
     return INITIAL_CONNECTIONS;
   });
@@ -93,13 +87,13 @@ export function Canvas() {
   useEffect(() => { selectedConnIdRef.current = selectedConnectionId; }, [selectedConnectionId]);
   // TỰ ĐỘNG LƯU NODES MỖI KHI CÓ THAY ĐỔI
   useEffect(() => {
-    localStorage.setItem('mindnode_nodes', JSON.stringify(nodes));
-  }, [nodes]);
+    localStorage.setItem(`mindnode_nodes_${mapId}`, JSON.stringify(nodes));
+  }, [nodes, mapId]);
 
   // TỰ ĐỘNG LƯU CONNECTIONS MỖI KHI CÓ THAY ĐỔI
   useEffect(() => {
-    localStorage.setItem('mindnode_connections', JSON.stringify(connections));
-  }, [connections]);
+    localStorage.setItem(`mindnode_connections_${mapId}`, JSON.stringify(connections));
+  }, [connections, mapId]);
   const saveSnapshot = useCallback(() => {
     setHistory(prev => [
       ...prev, 

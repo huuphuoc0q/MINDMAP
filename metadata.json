@@ -1,0 +1,6 @@
+{
+  "name": "MindNode Canvas",
+  "description": "Infinite canvas with draggable WYSIWYG rich-text nodes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

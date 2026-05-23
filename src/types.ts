@@ -4,7 +4,8 @@ export interface MindNodeData {
   y: number;
   width: number;
   height: number;
-  content: string; // HTML string containing rich text
+  content: string;
+  isCollapsed?: boolean; // HTML string containing rich text
 }
 
 export interface ConnectionData {

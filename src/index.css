@@ -13,4 +13,20 @@
   .node-editing {
     box-shadow: 0 0 0 2px #3B82F6, 0 10px 40px rgba(59,130,246,0.2);
   }
+
+  /* --- THÊM KHỐI NÀY VÀO: Phục hồi định dạng cho Bullet List --- */
+  .editor-content ul {
+    list-style-type: disc !important;
+    padding-left: 1.5rem !important;
+  }
+  
+  .editor-content ol {
+    list-style-type: decimal !important;
+    padding-left: 1.5rem !important;
+  }
+
+  .editor-content li {
+    margin-top: 0.25rem;
+  }
+  /* ----------------------------------------------------------- */
 }

@@ -107,44 +107,52 @@ export function Canvas({ mapId }: { mapId: string }) {
   useEffect(() => { nodesRef.current = nodes; }, [nodes]);
   useEffect(() => { transformRef.current = transform; }, [transform]);
   useEffect(() => { editNodeIdRef.current = editNodeId; }, [editNodeId]);
-  const nodeLevels = useMemo(() => {
+  // Thuật toán DFS tính toán: Level, Độ hiển thị (Visibility) và Nhánh con
+  // Thuật toán DFS tính toán: Level, Độ hiển thị (Visibility) và Nhánh con
+  const treeData = useMemo(() => {
     const levels: Record<string, number> = {};
-    
-    // 1. Tìm các Node gốc (Root Nodes) - là những Node không có dây nào trỏ tới
+    const visibleNodes = new Set<string>();
+    const hasChildren: Record<string, boolean> = {};
+
     const targetIds = new Set(connections.map(c => c.target));
     const roots = nodes.filter(n => !targetIds.has(n.id));
 
-    // 2. Tạo danh sách kề (Adjacency List) để biết Node cha chỉ tới những Node con nào
     const adjList: Record<string, string[]> = {};
     connections.forEach(c => {
       if (!adjList[c.source]) adjList[c.source] = [];
       adjList[c.source].push(c.target);
     });
 
-    // 3. Duyệt BFS để gán Level
-    const queue: { id: string, level: number }[] = roots.map(r => ({ id: r.id, level: 0 }));
+    // --- BẢO VỆ CHỐNG LẶP VÔ TẬN (Infinite Loop Protection) ---
     const visited = new Set<string>();
 
-    while (queue.length > 0) {
-      const { id, level } = queue.shift()!;
-      if (visited.has(id)) continue; // Tránh lặp vô tận nếu người dùng nối vòng tròn
-      visited.add(id);
+    const dfs = (nodeId: string, currentLevel: number, isVisible: boolean) => {
+      // Nếu Node này đã duyệt qua rồi thì DỪNG LẠI NGAY để chống treo máy
+      if (visited.has(nodeId)) return; 
+      visited.add(nodeId);
 
-      levels[id] = level;
+      levels[nodeId] = currentLevel;
+      if (isVisible) visibleNodes.add(nodeId);
 
-      if (adjList[id]) {
-        adjList[id].forEach(childId => {
-          queue.push({ id: childId, level: level + 1 });
-        });
-      }
-    }
+      const children = adjList[nodeId] || [];
+      hasChildren[nodeId] = children.length > 0;
 
-    // Đảm bảo mọi Node đều có level (kể cả Node đứng bơ vơ 1 mình)
+      const node = nodes.find(n => n.id === nodeId);
+      const childrenVisible = isVisible && !(node?.isCollapsed);
+
+      children.forEach(childId => {
+        dfs(childId, currentLevel + 1, childrenVisible);
+      });
+    };
+
+    roots.forEach(r => dfs(r.id, 0, true));
+
+    // Xử lý các node mồ côi
     nodes.forEach(n => {
-      if (levels[n.id] === undefined) levels[n.id] = 0;
+      if (levels[n.id] === undefined) dfs(n.id, 0, true);
     });
 
-    return levels;
+    return { levels, visibleNodes, hasChildren };
   }, [nodes, connections]);
 useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -382,12 +390,15 @@ useEffect(() => {
            const sourceId = connectingRef.current.sourceNodeId;
            
            if (targetId && targetId !== sourceId) {
-               // Update connection globally
-               setConnections(prev => {
-                   if (prev.some(c => c.source === sourceId && c.target === targetId)) return prev;
-                   return [...prev, { id: `c${Date.now()}`, source: sourceId, target: targetId }];
-               });
-           }
+                   // THÊM DÒNG NÀY ĐỂ BẤM CTRL + Z KHÔNG BỊ LỖI
+                   saveSnapshot(); 
+                   
+                   // Update connection globally
+                   setConnections(prev => {
+                       if (prev.some(c => c.source === sourceId && c.target === targetId)) return prev;
+                       return [...prev, { id: `c${Date.now()}`, source: sourceId, target: targetId }];
+                   });
+               }
        }
        if (tempLineRef.current) tempLineRef.current.style.display = 'block';
        connectingRef.current = null;
@@ -471,7 +482,13 @@ useEffect(() => {
   const handleNodeChange = useCallback((id: string, newContent: string) => {
     setNodes(prev => prev.map(n => n.id === id ? { ...n, content: newContent } : n));
   }, []);
-
+const handleToggleCollapse = useCallback((nodeId: string, e: React.PointerEvent) => {
+    e.stopPropagation();
+    saveSnapshot(); // Lưu lịch sử cho Ctrl + Z
+    setNodes(prev => prev.map(n => 
+      n.id === nodeId ? { ...n, isCollapsed: !n.isCollapsed } : n
+    ));
+  }, [saveSnapshot]);
   const handleConnectionStart = useCallback((nodeId: string, e: React.PointerEvent) => {
     const node = nodesRef.current.find(n => n.id === nodeId);
     if (!node) return;
@@ -485,6 +502,105 @@ useEffect(() => {
       containerRef.current?.setPointerCapture(e.pointerId);
     } catch {}
   }, []);
+  // THUẬT TOÁN AUTO-LAYOUT (Sắp xếp cây thông minh)
+  // THUẬT TOÁN AUTO-LAYOUT (Sắp xếp cây thông minh - Đã fix đo DOM thực tế)
+  const handleAutoLayout = useCallback(() => {
+    saveSnapshot();
+
+    setNodes(prevNodes => {
+      const newNodes = prevNodes.map(n => ({ ...n }));
+
+      const HORIZONTAL_SPACING = 120; 
+      const VERTICAL_SPACING = 30;    
+
+      // 1. ĐO KÍCH THƯỚC THỰC TẾ TRÊN MÀN HÌNH (DOM) CHỐNG OVERLAP
+      const nodeDims: Record<string, { w: number, h: number }> = {};
+      newNodes.forEach(n => {
+        const el = nodeRefs.current[n.id];
+        nodeDims[n.id] = {
+          w: el ? el.offsetWidth : n.width,
+          h: el ? el.offsetHeight : n.height // Lấy chiều cao thực tế kể cả khi text dài
+        };
+      });
+
+      const targetIds = new Set(connections.map(c => c.target));
+      const roots = newNodes.filter(n => !targetIds.has(n.id));
+
+      const adjList: Record<string, string[]> = {};
+      connections.forEach(c => {
+        if (!adjList[c.source]) adjList[c.source] = [];
+        adjList[c.source].push(c.target);
+      });
+
+      const subtreeHeights: Record<string, number> = {};
+
+      // 2. Tính toán không gian chiều cao dựa trên KÍCH THƯỚC THỰC
+      const calculateSubtreeHeight = (nodeId: string) => {
+        const node = newNodes.find(n => n.id === nodeId);
+        if (!node) return 0;
+        
+        const dims = nodeDims[nodeId];
+        const children = adjList[nodeId] || [];
+        
+        if (node.isCollapsed || children.length === 0) {
+          subtreeHeights[nodeId] = dims.h;
+          return dims.h;
+        }
+
+        let totalChildrenHeight = 0;
+        children.forEach((childId, index) => {
+          totalChildrenHeight += calculateSubtreeHeight(childId);
+          if (index < children.length - 1) totalChildrenHeight += VERTICAL_SPACING;
+        });
+
+        // Chiều cao không gian = Max giữa chiều cao thực của Cha và tổng các Con
+        subtreeHeights[nodeId] = Math.max(dims.h, totalChildrenHeight);
+        return subtreeHeights[nodeId];
+      };
+
+      // 3. Phân bổ tọa độ và Căn giữa
+      const positionNodes = (nodeId: string, startX: number, startY: number) => {
+        const node = newNodes.find(n => n.id === nodeId);
+        if (!node) return;
+        
+        const dims = nodeDims[nodeId];
+        node.x = startX;
+        
+        // Tính tâm của không gian nhánh
+        const nodeSubtreeH = subtreeHeights[nodeId] || dims.h;
+        node.y = startY + (nodeSubtreeH / 2) - (dims.h / 2);
+
+        const children = adjList[nodeId] || [];
+        if (node.isCollapsed || children.length === 0) return;
+
+        // Tính tổng chiều cao thực của các con để căn giữa chúng so với Cha
+        let totalChildrenH = 0;
+        children.forEach((childId, i) => {
+           totalChildrenH += subtreeHeights[childId];
+           if (i < children.length - 1) totalChildrenH += VERTICAL_SPACING;
+        });
+
+        // Tọa độ Y bắt đầu của nhóm con để đảm bảo nằm giữa
+        let currentChildY = startY + (nodeSubtreeH / 2) - (totalChildrenH / 2);
+
+        children.forEach(childId => {
+          const childSubtreeH = subtreeHeights[childId] || 0;
+          positionNodes(childId, startX + dims.w + HORIZONTAL_SPACING, currentChildY);
+          currentChildY += childSubtreeH + VERTICAL_SPACING;
+        });
+      };
+
+      // 4. Chạy thuật toán
+      let currentRootY = 100; 
+      roots.forEach(root => {
+        calculateSubtreeHeight(root.id);
+        positionNodes(root.id, 100, currentRootY); 
+        currentRootY += (subtreeHeights[root.id] || nodeDims[root.id].h) + VERTICAL_SPACING * 3; 
+      });
+
+      return newNodes;
+    });
+  }, [connections, saveSnapshot]);
 const handleNodeResizeStart = useCallback((nodeId: string, e: React.PointerEvent) => {
     e.stopPropagation();
     setSelectedNodeId(nodeId);
@@ -520,7 +636,7 @@ const handleNodeResizeStart = useCallback((nodeId: string, e: React.PointerEvent
           height: 100,
           content: 'Khái niệm mới...'
       };
-      
+      saveSnapshot();
       setNodes(prev => [...prev, newNode]);
       setSelectedNodeId(newNode.id);
       setEditNodeId(newNode.id);
@@ -528,6 +644,7 @@ const handleNodeResizeStart = useCallback((nodeId: string, e: React.PointerEvent
 
   const renderConnections = () => {
     return connections.map(conn => {
+      if (!treeData.visibleNodes.has(conn.source) || !treeData.visibleNodes.has(conn.target)) return null;
       const source = nodes.find(n => n.id === conn.source);
       const target = nodes.find(n => n.id === conn.target);
       if (!source || !target) return null;
@@ -598,19 +715,23 @@ const handleNodeResizeStart = useCallback((nodeId: string, e: React.PointerEvent
         </svg>
 
         {/* Distributed Logic Nodes Layer */}
-        {nodes.map(node => (
+        {/* LỌC CHỈ VẼ CÁC NODE CÓ TRONG SET visibleNodes */}
+        {nodes.filter(n => treeData.visibleNodes.has(n.id)).map(node => (
           <EditorNode
             key={node.id}
             ref={el => { nodeRefs.current[node.id] = el; }}
             node={node}
-            level={nodeLevels[node.id]} 
+            level={treeData.levels[node.id]}            // Dùng treeData thay cho nodeLevels cũ
+            hasChildren={treeData.hasChildren[node.id]}    // Truyền prop mới
+            isCollapsed={!!node.isCollapsed}               // Truyền prop mới
             isEditing={editNodeId === node.id}
             isSelected={selectedNodeId === node.id}
             onPointerDown={handleNodePointerDown}
             onDoubleClick={handleNodeDoubleClick}
             onChange={handleNodeChange}
             onConnectionStart={handleConnectionStart}
-            onResizeStart={handleNodeResizeStart} // <--- THÊM DÒNG NÀY
+            onResizeStart={handleNodeResizeStart}
+            onToggleCollapse={handleToggleCollapse}        // Truyền hàm click vào
           />
         ))}
       </div>
@@ -622,7 +743,22 @@ const handleNodeResizeStart = useCallback((nodeId: string, e: React.PointerEvent
         />
       )}
       
-      {/* HUD Hint Panel */}
+      {/* NÚT AUTO-LAYOUT */}
+      <button
+        // --- THÊM DÒNG NÀY ĐỂ CHẶN CANVAS "CƯỚP" CHUỘT ---
+        onPointerDown={(e) => e.stopPropagation()} 
+        // ------------------------------------------------
+        onClick={(e) => {
+          e.stopPropagation();
+          handleAutoLayout();
+        }}
+        className="absolute bottom-20 left-1/2 -translate-x-1/2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-full shadow-[0_0_15px_rgba(37,99,235,0.5)] transition-all hover:scale-105 hover:shadow-[0_0_25px_rgba(37,99,235,0.8)] z-50 flex items-center gap-2"
+        title="Tự động gióng hàng các nhánh"
+      >
+        <span>✨</span> Sắp xếp Tự động
+      </button>
+
+      {/* HUD Hint Panel (Giữ nguyên code cũ của bạn) */}
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 px-4 py-2 bg-black/60 backdrop-blur-md rounded-full border border-white/10 text-[11px] text-white/50 tracking-wide pointer-events-none whitespace-nowrap">
         Double-click background to <span className="text-white">Create Node</span> &bull; Double-click node to <span className="text-white">Edit</span> &bull; Click line to <span className="text-white">Delete</span> &bull; Drag background to <span className="text-white">Pan</span>
       </div>

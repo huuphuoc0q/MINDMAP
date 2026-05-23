@@ -158,7 +158,13 @@ export function FloatingToolbar({ x, y }: FloatingToolbarProps) {
 
       <button
         type="button"
-        onClick={() => applyCommand('insertUnorderedList')}
+        // 1. Thay đổi onClick thành onMouseDown và thêm stopPropagation
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          applyCommand('insertUnorderedList');
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
         className="w-8 h-8 rounded text-white flex items-center justify-center hover:bg-white/10 transition-colors"
         title="Bullet List"
       >

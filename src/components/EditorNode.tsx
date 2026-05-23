@@ -4,26 +4,31 @@ import { MindNodeData } from '../types';
 interface EditorNodeProps {
   node: MindNodeData;
   level: number;
+  hasChildren: boolean;     // <--- THÊM DÒNG NÀY: Biết để hiện nút +/-
+  isCollapsed: boolean;     // <--- THÊM DÒNG NÀY: Đang đóng hay mở
   isEditing: boolean;
   isSelected: boolean;
   onPointerDown: (nodeId: string, e: React.PointerEvent) => void;
   onDoubleClick: (nodeId: string, e: React.MouseEvent) => void;
   onChange: (id: string, newContent: string) => void;
   onConnectionStart: (nodeId: string, e: React.PointerEvent) => void;
-  // THÊM DÒNG NÀY:
-  onResizeStart: (nodeId: string, e: React.PointerEvent) => void; 
+  onResizeStart?: (nodeId: string, e: React.PointerEvent) => void;
+  onToggleCollapse: (nodeId: string, e: React.PointerEvent) => void; // <--- THÊM DÒNG NÀY
 }
 
 export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
   node,
   level, 
+  hasChildren,      // <--- Kéo biến vào
+  isCollapsed,
   isEditing,
   isSelected,
   onPointerDown,
   onDoubleClick,
   onChange,
   onConnectionStart,
-  onResizeStart, // <--- THÊM VÀO ĐÂY
+  onResizeStart, 
+  onToggleCollapse,// <--- THÊM VÀO ĐÂY
 }, ref) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const isEditingRef = useRef(isEditing);
@@ -117,16 +122,44 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
     >
       {/* Node Header */}
       {!isEditing && (
-        <div className="absolute top-2 left-4 text-[10px] font-mono text-white/30 tracking-tight select-none pointer-events-none">
-          ID: {node.id.toUpperCase()}
+        <div className="absolute top-2 left-4 flex items-center gap-1.5 select-none pointer-events-none">
+          {/* Chấm tròn nhỏ đổi màu theo tầng để tăng độ nhận diện */}
+          <div className={`w-1.5 h-1.5 rounded-full ${nodeThemeClass.replace('border-', 'bg-').replace('/60', '').replace('/50', '')}`} />
+          
+          {/* Nhãn phân cấp */}
+          <span className="text-[9px] font-bold text-white/50 tracking-widest uppercase">
+            {level === 0 ? "Chủ đề chính" : `Nhánh cấp ${level}`}
+          </span>
         </div>
       )}
+      
+      {/* (Giữ nguyên phần EDITING MODE bên dưới) */}
       {isEditing && (
         <div className="absolute top-2 left-4 right-4 text-[10px] font-mono text-blue-400 flex justify-between select-none pointer-events-none">
           <span>EDITING MODE</span>
         </div>
       )}
-
+{/* --- THÊM KHỐI NÚT TOGGLE COLLAPSE --- */}
+      {hasChildren && !isEditing && (
+        <div 
+          // ĐÃ SỬA: Đổi vị trí từ right-[-24px] top-1/2 thành -top-3 -right-3 (Góc trên cùng bên phải)
+          className={`absolute -top-3 -right-3 w-5 h-5 flex items-center justify-center rounded-full border-2 cursor-pointer transition-all z-40 hover:scale-125
+            ${isCollapsed ? 'bg-blue-500 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.8)]' : 'bg-[#25282E] border-white/20 text-white/60 hover:text-white'}
+          `}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onToggleCollapse(node.id, e);
+          }}
+          title={isCollapsed ? "Mở rộng nhánh" : "Thu gọn nhánh"}
+        >
+          {/* Dùng SVG vẽ dấu + và - cho sắc nét */}
+          {isCollapsed ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12h14"/></svg>
+          )}
+        </div>
+      )}
       {/* Output Node Connection Handle */}
       {!isEditing && (
         <div 
@@ -140,7 +173,8 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
         ref={contentRef}
         contentEditable={isEditing}
         suppressContentEditableWarning
-        className="outline-none pt-8 pb-4 px-4 w-full h-full text-[#E0E0E0] break-words rounded-xl"
+        // className="outline-none pt-8 pb-4 px-4 w-full h-full text-[#E0E0E0] break-words rounded-xl"
+        className="editor-content outline-none pt-8 pb-4 px-4 w-full h-full text-[#E0E0E0] break-words rounded-xl"
         style={{
           userSelect: isEditing ? 'text' : 'none',
           WebkitUserSelect: isEditing ? 'text' : 'none',

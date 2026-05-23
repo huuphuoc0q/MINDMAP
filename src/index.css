@@ -28,5 +28,13 @@
   .editor-content li {
     margin-top: 0.25rem;
   }
+  /* ... (Các code cũ giữ nguyên) ... */
+
+  /* Ép chữ in đậm chuyển sang màu vàng cam */
+  .editor-content b,
+  .editor-content strong {
+    color: #F59E0B !important; /* Màu vàng cam (Amber-500 của Tailwind) */
+    font-weight: 800 !important; /* Tăng độ đậm lên một chút cho chói lọi */
+  }
   /* ----------------------------------------------------------- */
 }

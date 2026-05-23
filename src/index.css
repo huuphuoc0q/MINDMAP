@@ -31,10 +31,20 @@
   /* ... (Các code cũ giữ nguyên) ... */
 
   /* Ép chữ in đậm chuyển sang màu vàng cam */
-  .editor-content b,
-  .editor-content strong {
-    color: #F59E0B !important; /* Màu vàng cam (Amber-500 của Tailwind) */
-    font-weight: 800 !important; /* Tăng độ đậm lên một chút cho chói lọi */
+  /* 1. Ép chữ in đậm sang vàng cam (LOẠI TRỪ các thẻ bị trình duyệt ép về normal) */
+  .editor-content b:not([style*="normal"]):not([style*="400"]),
+  .editor-content strong:not([style*="normal"]):not([style*="400"]) {
+    color: #F59E0B !important; 
+    font-weight: 800 !important; 
+  }
+
+  /* 2. Sửa lỗi "bẫy in đậm" của Chrome: Trả lại màu gốc cho chữ đã tắt in đậm */
+  .editor-content b[style*="normal"],
+  .editor-content strong[style*="normal"],
+  .editor-content span[style*="font-weight: normal"],
+  .editor-content span[style*="font-weight: 400"] {
+    color: inherit !important;
+    font-weight: normal !important;
   }
   /* ----------------------------------------------------------- */
 }

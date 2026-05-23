@@ -30,7 +30,6 @@
   }
   /* ... (Các code cũ giữ nguyên) ... */
 
-  /* Ép chữ in đậm chuyển sang màu vàng cam */
   /* 1. Ép chữ in đậm sang vàng cam (LOẠI TRỪ các thẻ bị trình duyệt ép về normal) */
   .editor-content b:not([style*="normal"]):not([style*="400"]),
   .editor-content strong:not([style*="normal"]):not([style*="400"]) {
@@ -38,12 +37,12 @@
     font-weight: 800 !important; 
   }
 
-  /* 2. Sửa lỗi "bẫy in đậm" của Chrome: Trả lại màu gốc cho chữ đã tắt in đậm */
+  /* 2. Sửa lỗi "dính chùm" màu cam: Trả về ĐÚNG MÀU TRẮNG XÁM thay vì inherit */
   .editor-content b[style*="normal"],
   .editor-content strong[style*="normal"],
   .editor-content span[style*="font-weight: normal"],
   .editor-content span[style*="font-weight: 400"] {
-    color: inherit !important;
+    color: #E0E0E0 !important; /* <-- ĐÃ SỬA DÒNG NÀY (Thay inherit bằng #E0E0E0) */
     font-weight: normal !important;
   }
   /* ----------------------------------------------------------- */

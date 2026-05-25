@@ -86,6 +86,41 @@ const cloneState = (nodes: MindNodeData[], connections: ConnectionData[]): Histo
   };
 };
 
+// Helper to calculate the optimal transform for a node in Presentation Mode
+const getOptimalPresentationTransform = (node: MindNodeData): CanvasTransform => {
+  const nodeEl = document.querySelector(`[data-node-id="${node.id}"]`) as HTMLDivElement | null;
+  const actualWidth = nodeEl ? nodeEl.offsetWidth : node.width;
+  const actualHeight = nodeEl ? nodeEl.offsetHeight : node.height;
+
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  // Spacing / Safety margins around the node content
+  // Horizontal padding: 60px each side
+  const paddingX = 120;
+  // Vertical padding: 80px top, 160px bottom (extra room for HUD controls)
+  const paddingY = 240;
+
+  // Calculate the max allowed scale to fit both width and height within padding limits
+  const maxScaleX = (vw - paddingX) / actualWidth;
+  const maxScaleY = (vh - paddingY) / actualHeight;
+
+  // Choose the smaller of the two scales to ensure full visibility,
+  // cap maximum scale at 1.4 to maintain crisp typography,
+  // and set a minimum scale of 0.4.
+  let scale = Math.min(1.4, maxScaleX, maxScaleY);
+  if (scale < 0.4) scale = 0.4;
+
+  // Center horizontally and vertically (but shift center Y slightly up to clear bottom HUD)
+  const targetCenterX = vw / 2;
+  const targetCenterY = (vh - 100) / 2;
+
+  const x = targetCenterX - (node.x + actualWidth / 2) * scale;
+  const y = targetCenterY - (node.y + actualHeight / 2) * scale;
+
+  return { x, y, scale };
+};
+
 export const useMindMapStore = create<MindMapStore>((set, get) => {
   // Helper to persist to localStorage
   const persistToLocalStorage = (mapId: string, nodes: MindNodeData[], connections: ConnectionData[]) => {
@@ -443,9 +478,7 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
         
         const firstNode = nodes.find(n => n.id === presentationOrder[0]);
         if (firstNode) {
-          const scale = 1.5;
-          const x = window.innerWidth / 2 - (firstNode.x + firstNode.width / 2) * scale;
-          const y = window.innerHeight / 2 - (firstNode.y + firstNode.height / 2) * scale;
+          const { x, y, scale } = getOptimalPresentationTransform(firstNode);
           set({ transform: { x, y, scale } });
         }
       }
@@ -465,9 +498,7 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
         const targetNode = state.nodes.find(n => n.id === targetNodeId);
         
         if (targetNode) {
-          const scale = 1.5;
-          const x = window.innerWidth / 2 - (targetNode.x + targetNode.width / 2) * scale;
-          const y = window.innerHeight / 2 - (targetNode.y + targetNode.height / 2) * scale;
+          const { x, y, scale } = getOptimalPresentationTransform(targetNode);
           set({ presentationIndex: nextIndex, transform: { x, y, scale } });
         } else {
           set({ presentationIndex: nextIndex });
@@ -485,9 +516,7 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
         const targetNode = state.nodes.find(n => n.id === targetNodeId);
         
         if (targetNode) {
-          const scale = 1.5;
-          const x = window.innerWidth / 2 - (targetNode.x + targetNode.width / 2) * scale;
-          const y = window.innerHeight / 2 - (targetNode.y + targetNode.height / 2) * scale;
+          const { x, y, scale } = getOptimalPresentationTransform(targetNode);
           set({ presentationIndex: prevIndex, transform: { x, y, scale } });
         } else {
           set({ presentationIndex: prevIndex });

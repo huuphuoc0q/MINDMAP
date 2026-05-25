@@ -342,6 +342,7 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [importText, setImportText] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
 
   // 1. QUẢN LÝ DANH SÁCH CÁC MINDMAP (Khởi tạo từ LocalStorage)
   const [maps, setMaps] = useState<MapMeta[]>(() => {
@@ -473,6 +474,108 @@ export default function App() {
 
   const handleOpenExport = () => {
     setIsExportJsonOpen(true);
+  };
+
+  const handleCopyPrompt = async () => {
+    const promptText = `Hãy đóng vai trò là một chuyên gia thiết kế Sơ đồ tư duy (MindMap) và tạo ra dữ liệu cấu trúc dưới dạng JSON chuẩn xác nhất cho ứng dụng **MindNode Canvas**.
+
+Nhiệm vụ của bạn là chuyển đổi chủ đề/kiến thức được yêu cầu thành một sơ đồ tư duy có cấu trúc phân cấp thông minh, rõ ràng và cân đối.
+
+Dữ liệu JSON đầu ra bắt buộc phải tuân thủ nghiêm ngặt định dạng cấu trúc sau:
+
+\`\`\`json
+{
+  "nodes": [
+    {
+      "id": "n1", 
+      "x": 100, 
+      "y": 300, 
+      "width": 250, 
+      "height": 100, 
+      "content": "<b>Chủ đề chính</b><br/>Mô tả ngắn gọn"
+    },
+    ...
+  ],
+  "connections": [
+    {
+      "id": "c1",
+      "source": "n1",
+      "target": "n2"
+    },
+    ...
+  ]
+}
+\`\`\`
+
+### 📌 NGUYÊN TẮC PHÂN CẤP LINH HOẠT & MODULAR (TRÁNH RỐI MẮT):
+1. **Độ sâu linh hoạt (Few/Many Levels)**: Không cố định số cấp cho mọi nhánh. Hãy tùy biến độ sâu của từng nhánh dựa trên độ phức tạp của nội dung:
+   - Các nhánh đơn giản (ví dụ: Ví dụ thực tế, ghi chú phụ, định nghĩa ngắn) chỉ nên có 1 - 2 cấp.
+   - Các nhánh lý thuyết cốt lõi hoặc quy trình phức tạp có thể chia sâu từ 3 - 5 cấp.
+2. **Chia nhỏ khối nội dung (Multiple Sub-blocks)**: TUYỆT ĐỐI KHÔNG dồn ép quá nhiều ý, danh sách dài hay các khối chữ lớn vào trong một Node duy nhất làm rối mắt và tràn viền.
+   - Thay vì tạo 1 Node chứa danh sách 5-10 dòng chữ, hãy chia nhỏ nội dung đó thành 1 Node cha (chứa tiêu đề/tóm tắt khái quát) và tách 5-10 ý chi tiết kia thành 5-10 Node con tương ứng kết nối với Node cha.
+   - Giới hạn từ ngữ: Mỗi Node chỉ nên chứa tối đa 20 - 30 từ, sử dụng thẻ \`<br/>\` để ngắt dòng hợp lý giúp chiều rộng thẻ luôn thon gọn (~250px đến ~300px).
+
+### 📌 QUY TẮC PHÂN BỔ TỌA ĐỘ (X, Y) ĐỂ TRANH CHỒNG ĐÈ:
+Bạn phải tự động tính toán tọa độ (x, y) cho từng Node theo nguyên tắc phân nhánh từ trái qua phải một cách có tính toán chiều cao của các nhánh con (Sub-tree Height):
+1. **Phân bố trục X (Phân cấp)**:
+   - Gốc (Root): \`x: 100\`.
+   - Nhánh cấp 1 (Level 1): \`x: 480\` (khoảng cách \`+380px\` để chừa không gian kết nối thoải mái).
+   - Nhánh cấp 2 (Level 2): \`x: 860\` (khoảng cách \`+380px\`).
+   - Nhánh cấp 3 (Level 3): \`x: 1240\` (khoảng cách \`+380px\`).
+   - Nhánh cấp 4 (Level 4): \`x: 1620\`.
+2. **Phân bố trục Y (Tránh đè nhau & Cân đối)**:
+   - Mốc ban đầu của Root nằm ở \`y: 300\`.
+   - Các nhánh con của cùng một Node cha phải được phân bổ đối xứng theo chiều dọc xung quanh tọa độ \`y\` của Node cha.
+   - **Quan trọng**: Nếu một Node con có nhiều con và cháu của riêng nó (một sub-tree lớn), bạn phải chừa ra một khoảng trống dọc rất lớn (Ví dụ: khoảng cách dọc \`y\` với các nhánh anh em kề bên phải tăng từ \`150px\` thông thường lên \`300px\` - \`500px\`) để toàn bộ cụm con cháu của nó không đè lên cụm con cháu của nhánh anh em.
+   - Hãy hình dung tổng thể chiều cao của mỗi nhánh và cộng dồn tọa độ \`y\` lũy tiến một cách hợp lý để tạo ra một bố cục thông thoáng, tuyệt mỹ.
+
+### 📌 ĐỊNH DẠNG NỘI DUNG (content) - RẤT QUAN TRỌNG:
+Trường \`content\` hỗ trợ chuỗi HTML để hiển thị văn bản phong phú và định dạng premium:
+1. **Tiêu đề in đậm**: Dùng thẻ \`<b>\` hoặc \`<strong>\` cho các khái niệm hoặc tiêu đề chính (Ví dụ: \`<b>Ý TƯỞNG CỐT LÕI:</b>\`).
+2. **Xuống dòng**: Dùng thẻ \`<br/>\` để phân tách tiêu đề và mô tả chi tiết giúp thẻ Node không bị quá rộng theo chiều ngang.
+3. **Hiệu ứng Highlight in đậm màu vàng hổ phách**: Để làm nổi bật các từ khóa cực kỳ quan trọng, hãy dùng chính xác thẻ:
+   \`<span class="editor-highlight" style="color: rgb(245, 158, 11); font-weight: bold;">từ_khóa_nổi_bật</span>\`
+
+### 📌 YÊU CẦU ĐỐI VỚI LIÊN KẾT (connections):
+- Mỗi connection phải có một \`id\` duy nhất dạng chuỗi (ví dụ: \`"c1"\`, \`"c2"\`...).
+- \`source\` phải là \`id\` của Node cha.
+- \`target\` phải là \`id\` của Node con.
+- Đảm bảo mỗi Node con chỉ được kết nối đến duy nhất 1 Node cha (cấu trúc hình cây chuẩn).
+
+Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi tiết, phong phú về kiến thức cho chủ đề sau: `;
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(promptText);
+        setPromptCopied(true);
+        setTimeout(() => setPromptCopied(false), 2000);
+      } else {
+        throw new Error("No clipboard API");
+      }
+    } catch (err) {
+      console.warn("Clipboard API failed, using fallback", err);
+      const textArea = document.createElement("textarea");
+      textArea.value = promptText;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      textArea.style.top = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+          setPromptCopied(true);
+          setTimeout(() => setPromptCopied(false), 2000);
+        } else {
+          alert("Không thể tự động sao chép prompt. Vui lòng thử lại hoặc sao chép thủ công.");
+        }
+      } catch (e) {
+        alert("Không thể tự động sao chép prompt. Vui lòng thử lại hoặc sao chép thủ công.");
+      } finally {
+        textArea.remove();
+      }
+    }
   };
 
   // 2. TÍNH NĂNG TẠO MỚI VÀ ĐỔI TÊN MÔN HỌC
@@ -847,6 +950,34 @@ export default function App() {
             <p className="text-xs text-white/60">
               Dán đoạn mã JSON của sơ đồ vào khung bên dưới, hoặc bấm chọn tệp tin JSON từ máy tính của bạn.
             </p>
+
+            {/* Banner Sao chép Prompt AI */}
+            <div className="flex items-center justify-between bg-blue-500/10 border border-blue-500/20 px-4 py-3 rounded-xl gap-3">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs font-semibold text-blue-400">Bạn muốn AI khác tạo sơ đồ hộ bạn?</span>
+                <span className="text-[11px] text-white/60 leading-normal">Sao chép prompt này để hướng dẫn các AI (ChatGPT/Claude/Gemini) tạo cấu trúc JSON chuẩn có highlight và căn chỉnh phân tầng tuyệt đẹp.</span>
+              </div>
+              <button
+                onClick={handleCopyPrompt}
+                className={`shrink-0 flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer active:scale-95 border ${
+                  promptCopied
+                    ? 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]'
+                    : 'bg-blue-600/20 border-blue-500/30 text-blue-400 hover:bg-blue-600/30 hover:text-blue-300 hover:border-blue-400'
+                }`}
+              >
+                {promptCopied ? (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    Đã sao chép!
+                  </>
+                ) : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    Sao chép Prompt AI
+                  </>
+                )}
+              </button>
+            </div>
 
             {/* File upload area */}
             <div className="flex items-center gap-3 bg-white/5 border border-white/5 px-4 py-3 rounded-xl">

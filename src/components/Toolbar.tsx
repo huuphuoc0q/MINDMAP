@@ -1,5 +1,5 @@
 import { Bold, Italic, Underline, List, Type, Heading } from 'lucide-react'; // THÊM Heading ở đây
-import { useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 interface FloatingToolbarProps {
   x: number;
   y: number;
@@ -40,7 +40,7 @@ export function FloatingToolbar({ x, y }: FloatingToolbarProps) {
   };
   return (
     <div
-      className="absolute z-50 flex items-center px-1 gap-1 h-10 bg-[#25282E] rounded-lg border border-white/10 shadow-2xl will-change-transform"
+      className="absolute z-50 flex items-center px-1.5 py-1 gap-1 bg-[#12141A]/80 backdrop-blur-xl rounded-xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.5)] will-change-transform transition-all"
       style={{
         left: x,
         top: y,
@@ -95,8 +95,7 @@ export function FloatingToolbar({ x, y }: FloatingToolbarProps) {
         {showColors && (
           <div
             ref={colorPickerRef}
-            // Đã thêm: w-max, left-1/2, -translate-x-1/2, z-50
-            className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 bg-[#25282E] border border-white/10 shadow-2xl rounded-md grid grid-cols-3 gap-2 w-max z-50"
+            className="absolute top-full left-1/2 -translate-x-1/2 mt-2 p-2 bg-[#12141A]/90 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.5)] rounded-xl grid grid-cols-3 gap-2 w-max z-50"
           >
             {COLORS.map((color) => (
               <button
@@ -134,7 +133,7 @@ export function FloatingToolbar({ x, y }: FloatingToolbarProps) {
 
         {showSizes && (
           <div
-            className="absolute top-full left-1/2 -translate-x-1/2 mt-2 py-1 bg-[#25282E] border border-white/10 shadow-2xl rounded-md flex flex-col w-32 z-50 overflow-hidden"
+            className="absolute top-full left-1/2 -translate-x-1/2 mt-2 py-1.5 bg-[#12141A]/90 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.5)] rounded-xl flex flex-col w-36 z-50 overflow-hidden"
           >
             {TEXT_SIZES.map((size) => (
               <button

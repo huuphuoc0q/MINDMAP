@@ -256,11 +256,10 @@
 //     </div>
 //   );
 // }
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Canvas } from './components/Canvas';
-import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
-import { saveAs } from 'file-saver';
-import { MindNodeData, ConnectionData } from './types';
+import { useMindMapStore } from './store/useMindMapStore';
+import { exportWordDocument } from './utils/exportWord';
 
 // Cấu trúc dữ liệu cho một MindMap
 interface MapMeta {
@@ -268,8 +267,81 @@ interface MapMeta {
   name: string;
 }
 
+// Hàm xác thực cấu trúc dữ liệu JSON nhập vào sơ đồ
+const validateMindMapJSON = (data: any): { isValid: boolean; error?: string } => {
+  if (typeof data !== 'object' || data === null) {
+    return { isValid: false, error: 'Dữ liệu phải là một đối tượng JSON hợp lệ.' };
+  }
+  if (!Array.isArray(data.nodes)) {
+    return { isValid: false, error: 'Thiếu trường "nodes" hoặc trường "nodes" không phải là một danh sách (array).' };
+  }
+  for (let i = 0; i < data.nodes.length; i++) {
+    const node = data.nodes[i];
+    if (!node || typeof node !== 'object') {
+      return { isValid: false, error: `Node tại vị trí ${i} không phải là một đối tượng.` };
+    }
+    if (!node.id || typeof node.id !== 'string') {
+      return { isValid: false, error: `Node tại vị trí ${i} thiếu "id" hoặc "id" không hợp lệ.` };
+    }
+    if (typeof node.x !== 'number' || typeof node.y !== 'number') {
+      return { isValid: false, error: `Node "${node.id}" thiếu tọa độ "x", "y" hoặc giá trị không phải kiểu số.` };
+    }
+    if (typeof node.width !== 'number' || typeof node.height !== 'number') {
+      return { isValid: false, error: `Node "${node.id}" thiếu kích thước "width", "height" hoặc giá trị không phải kiểu số.` };
+    }
+    if (typeof node.content !== 'string') {
+      return { isValid: false, error: `Node "${node.id}" thiếu trường "content" hoặc "content" không phải kiểu chuỗi.` };
+    }
+  }
+
+  if (data.connections) {
+    if (!Array.isArray(data.connections)) {
+      return { isValid: false, error: 'Trường "connections" không phải là một danh sách (array).' };
+    }
+    for (let i = 0; i < data.connections.length; i++) {
+      const conn = data.connections[i];
+      if (!conn || typeof conn !== 'object') {
+        return { isValid: false, error: `Kết nối tại vị trí ${i} không phải là một đối tượng.` };
+      }
+      if (!conn.id || typeof conn.id !== 'string') {
+        return { isValid: false, error: `Kết nối tại vị trí ${i} thiếu "id" hoặc "id" không hợp lệ.` };
+      }
+      if (!conn.source || typeof conn.source !== 'string') {
+        return { isValid: false, error: `Kết nối "${conn.id}" thiếu "source" hoặc "source" không hợp lệ.` };
+      }
+      if (!conn.target || typeof conn.target !== 'string') {
+        return { isValid: false, error: `Kết nối "${conn.id}" thiếu "target" hoặc "target" không hợp lệ.` };
+      }
+    }
+  }
+  return { isValid: true };
+};
+
 export default function App() {
   const [isExporting, setIsExporting] = useState(false);
+  const [isNavCollapsed, setIsNavCollapsed] = useState(false); // Thêm state thu gọn Navbar
+
+  // Pull history and actions from Zustand store to drive navbar buttons
+  const nodes = useMindMapStore((state) => state.nodes);
+  const connections = useMindMapStore((state) => state.connections);
+  const importMapData = useMindMapStore((state) => state.importMapData);
+  const history = useMindMapStore((state) => state.history);
+  const future = useMindMapStore((state) => state.future);
+  const undo = useMindMapStore((state) => state.undo);
+  const redo = useMindMapStore((state) => state.redo);
+  const isPresenting = useMindMapStore((state) => state.isPresenting);
+  const startPresentation = useMindMapStore((state) => state.startPresentation);
+  const stopPresentation = useMindMapStore((state) => state.stopPresentation);
+  const presentationIndex = useMindMapStore((state) => state.presentationIndex);
+  const presentationNodes = useMindMapStore((state) => state.presentationNodes);
+  const nextSlide = useMindMapStore((state) => state.nextSlide);
+  const prevSlide = useMindMapStore((state) => state.prevSlide);
+
+  const [isExportJsonOpen, setIsExportJsonOpen] = useState(false);
+  const [isImportJsonOpen, setIsImportJsonOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   // 1. QUẢN LÝ DANH SÁCH CÁC MINDMAP (Khởi tạo từ LocalStorage)
   const [maps, setMaps] = useState<MapMeta[]>(() => {
@@ -282,6 +354,126 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('mindnode_map_index', JSON.stringify(maps));
   }, [maps]);
+
+  const handleDownloadJson = () => {
+    const dataStr = JSON.stringify({ nodes, connections }, null, 2);
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    
+    const exportFileDefaultName = `So_Do_${maps.find(m => m.id === currentMapId)?.name || 'default'}_${Date.now()}.json`;
+    
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+  };
+
+  const handleCopyJson = async () => {
+    const dataStr = JSON.stringify({ nodes, connections }, null, 2);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(dataStr);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } else {
+        throw new Error("No clipboard API");
+      }
+    } catch (err) {
+      console.warn("Clipboard API failed, using fallback", err);
+      const textArea = document.createElement("textarea");
+      textArea.value = dataStr;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      textArea.style.top = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } else {
+          alert("Không thể tự động sao chép. Vui lòng chọn văn bản và nhấn Ctrl+C / Cmd+C.");
+        }
+      } catch (e) {
+        alert("Không thể tự động sao chép. Vui lòng chọn văn bản và nhấn Ctrl+C / Cmd+C.");
+      } finally {
+        textArea.remove();
+      }
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileReader = new FileReader();
+    if (e.target.files && e.target.files[0]) {
+      fileReader.readAsText(e.target.files[0], "UTF-8");
+      fileReader.onload = (event) => {
+        if (event.target && typeof event.target.result === 'string') {
+          const content = event.target.result;
+          setImportText(content);
+          
+          try {
+            const parsed = JSON.parse(content);
+            const validation = validateMindMapJSON(parsed);
+            if (validation.isValid) {
+              setValidationError(null);
+            } else {
+              setValidationError(validation.error || 'Dữ liệu JSON sai định dạng.');
+            }
+          } catch (err: any) {
+            setValidationError(`Lỗi cú pháp JSON: ${err.message}`);
+          }
+        }
+      };
+    }
+  };
+
+  const handleTextareaChange = (val: string) => {
+    setImportText(val);
+    if (!val.trim()) {
+      setValidationError(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(val);
+      const validation = validateMindMapJSON(parsed);
+      if (validation.isValid) {
+        setValidationError(null);
+      } else {
+        setValidationError(validation.error || 'Dữ liệu JSON không hợp lệ.');
+      }
+    } catch (err: any) {
+      setValidationError(`Lỗi cú pháp JSON: ${err.message}`);
+    }
+  };
+
+  const handleApplyImport = () => {
+    try {
+      const parsed = JSON.parse(importText);
+      const validation = validateMindMapJSON(parsed);
+      if (!validation.isValid) {
+        setValidationError(validation.error || 'Dữ liệu JSON không hợp lệ.');
+        return;
+      }
+      
+      importMapData(parsed.nodes, parsed.connections || []);
+      setIsImportJsonOpen(false);
+      setImportText('');
+      setValidationError(null);
+    } catch (err: any) {
+      setValidationError(`Lỗi cú pháp JSON: ${err.message}`);
+    }
+  };
+
+  const handleOpenImport = () => {
+    setImportText('');
+    setValidationError(null);
+    setIsImportJsonOpen(true);
+  };
+
+  const handleOpenExport = () => {
+    setIsExportJsonOpen(true);
+  };
 
   // 2. TÍNH NĂNG TẠO MỚI VÀ ĐỔI TÊN MÔN HỌC
   const handleCreateMap = () => {
@@ -301,101 +493,14 @@ export default function App() {
     }
   };
 
-  // 3. TÍNH NĂNG XUẤT WORD (Đã cập nhật để xuất đúng môn đang chọn)
+  // 3. TÍNH NĂNG XUẤT WORD
   const handleExportWord = async () => {
     setIsExporting(true);
     try {
-      // LẤY DỮ LIỆU THEO ID ĐANG CHỌN
-      const savedNodes = localStorage.getItem(`mindnode_nodes_${currentMapId}`);
-      const savedConns = localStorage.getItem(`mindnode_connections_${currentMapId}`);
-
-      if (!savedNodes) {
-        alert("Sơ đồ này trống, không có gì để xuất!");
-        setIsExporting(false);
-        return;
-      }
-
-      const nodes: MindNodeData[] = JSON.parse(savedNodes);
-      const connections: ConnectionData[] = savedConns ? JSON.parse(savedConns) : [];
-
-      // ... (Phần Thuật toán DFS phân cấp Word của bạn giữ nguyên y hệt ở đây) ...
-      const targetIds = new Set(connections.map(c => c.target));
-      const roots = nodes.filter(n => !targetIds.has(n.id));
-
-      const adjList: Record<string, string[]> = {};
-      connections.forEach(c => {
-        if (!adjList[c.source]) adjList[c.source] = [];
-        adjList[c.source].push(c.target);
-      });
-
-      const orderedNodes: { node: MindNodeData, level: number }[] = [];
-      const visited = new Set<string>();
-
-      const dfs = (nodeId: string, currentLevel: number) => {
-        if (visited.has(nodeId)) return;
-        visited.add(nodeId);
-        const node = nodes.find(n => n.id === nodeId);
-        if (node) orderedNodes.push({ node, level: currentLevel });
-        if (adjList[nodeId]) {
-          adjList[nodeId].forEach(childId => dfs(childId, currentLevel + 1));
-        }
-      };
-
-      roots.forEach(r => dfs(r.id, 0));
-      nodes.forEach(n => { if (!visited.has(n.id)) dfs(n.id, 0); });
-
-      const docParagraphs: Paragraph[] = [];
-      orderedNodes.forEach(({ node, level }) => {
-        const cleanText = node.content
-          .replace(/<br\s*\/?>/gi, '\n')
-          .replace(/<\/div>|<\/p>/gi, '\n')
-          .replace(/<[^>]*>/g, '')
-          .replace(/&nbsp;/g, ' ')
-          .trim();
-
-        if (!cleanText) return;
-
-        const isBold = level < 3;
-        const isItalic = level === 2;
-        let fontSize = 24; 
-        let color = "000000"; 
-
-        if (level === 0) {
-          fontSize = 32; color = "1E3A8A"; 
-        } else if (level === 1) {
-          fontSize = 28; color = "374151"; 
-        } else if (level === 2) {
-          fontSize = 24; color = "4B5563"; 
-        }
-
-        const textRuns = cleanText.split('\n').map((line, index) => 
-          new TextRun({ 
-            text: line, break: index > 0 ? 1 : 0, bold: isBold, italics: isItalic, size: fontSize, color: color, font: "Arial" 
-          })
-        );
-
-        let paragraphConfig: any = {
-          children: textRuns,
-          spacing: { before: level === 0 ? 400 : 200, after: 120 } 
-        };
-
-        if (level === 0) paragraphConfig.heading = HeadingLevel.HEADING_1;
-        else if (level === 1) paragraphConfig.heading = HeadingLevel.HEADING_2;
-        else if (level === 2) paragraphConfig.heading = HeadingLevel.HEADING_3;
-        else {
-          paragraphConfig.bullet = { level: Math.min(level - 3, 8) };
-          paragraphConfig.spacing = { before: 100, after: 100 }; 
-        }
-
-        docParagraphs.push(new Paragraph(paragraphConfig));
-      });
-
-      const doc = new Document({ sections: [{ children: docParagraphs }] });
-      const blob = await Packer.toBlob(doc);
-      // Lấy tên môn học làm tên file Word
+      const activeNodes = useMindMapStore.getState().nodes;
+      const activeConns = useMindMapStore.getState().connections;
       const mapName = maps.find(m => m.id === currentMapId)?.name || 'DeCuong';
-      saveAs(blob, `${mapName}_${Date.now()}.docx`);
-
+      await exportWordDocument(mapName, activeNodes, activeConns);
     } catch (error) {
       console.error('Lỗi khi xuất Word:', error);
       alert('Đã có lỗi xảy ra trong quá trình tạo file Word!');
@@ -405,61 +510,403 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-full bg-[#0A0A0A] text-[#E0E0E0] font-sans overflow-hidden">
-      <nav className="flex items-center justify-between px-6 py-3 border-b border-white/10 bg-[#0F1115] shrink-0">
-        <div className="flex items-center gap-4">
-          <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-white">M</div>
-          <h1 className="text-lg font-semibold tracking-tight text-white">MindNode Canvas <span className="text-xs font-normal text-white/40 ml-2">v2.4.0</span></h1>
-        </div>
+    <div className="relative w-screen h-screen bg-[#09090b] text-[#E0E0E0] font-sans overflow-hidden">
+      
+      <nav 
+        className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 glass-panel rounded-2xl transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] overflow-hidden shadow-2xl flex items-center justify-between
+          ${isPresenting ? 'opacity-0 pointer-events-none -translate-y-10' : ''}
+          ${isNavCollapsed && !isPresenting ? 'w-14 h-14 px-0 cursor-pointer hover:bg-white/10' : 'w-[98%] max-w-6xl h-16 px-5'}`}
+        onClick={() => isNavCollapsed && !isPresenting && setIsNavCollapsed(false)}
+      >
         
-        <div className="flex gap-3 items-center">
+        {/* Nội dung Navbar khi mở rộng */}
+        <div className={`flex items-center justify-between w-full h-full transition-opacity duration-300 ${isNavCollapsed ? 'opacity-0 absolute pointer-events-none' : 'opacity-100 relative delay-150'}`}>
+          {/* Brand Section */}
+          <div className="flex items-center gap-4">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-white bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-500/20">
+              <span className="font-heading text-lg">M</span>
+            </div>
+            <div className="flex flex-col">
+              <h1 className="font-heading text-lg font-semibold tracking-tight text-white leading-tight">
+                MindNode Canvas
+              </h1>
+              <span className="text-[10px] font-medium text-white/40 uppercase tracking-widest">
+                v2.4.0 &bull; Beta
+              </span>
+            </div>
+          </div>
           
-          {/* --- KHU VỰC CHỌN VÀ QUẢN LÝ MINDMAP --- */}
-          <div className="flex items-center gap-1 bg-black/40 border border-white/10 rounded px-1 py-1">
-            <select
-              value={currentMapId}
-              onChange={(e) => setCurrentMapId(e.target.value)}
-              className="bg-transparent text-white text-xs px-2 outline-none cursor-pointer max-w-[150px] truncate"
+          {/* Actions Section */}
+          <div className="flex items-center flex-1 justify-end min-w-0">
+            <div 
+              className="flex gap-2 md:gap-3 items-center overflow-x-auto overflow-y-hidden pr-2 py-1 shrink-1 [&::-webkit-scrollbar]:hidden"
+              style={{ scrollbarWidth: 'none' }}
             >
-              {maps.map(m => (
-                <option key={m.id} value={m.id} className="bg-[#1A1C21]">{m.name}</option>
-              ))}
-            </select>
-            
-            <div className="w-px h-4 mx-1 bg-white/20" />
-            
-            <button onClick={handleCreateMap} className="w-6 h-6 flex items-center justify-center text-blue-400 hover:bg-white/10 rounded transition-colors" title="Tạo MindMap mới">
-              +
-            </button>
-            <button onClick={handleRenameMap} className="w-6 h-6 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 rounded transition-colors" title="Đổi tên MindMap">
-              ✎
-            </button>
-          </div>
-          {/* -------------------------------------- */}
+              {/* Map Management */}
+            <div className="flex items-center gap-2 bg-black/20 border border-white/5 rounded-lg px-2 py-1.5 shadow-inner">
+              <div className="relative group">
+                <select
+                  value={currentMapId}
+                  onChange={(e) => setCurrentMapId(e.target.value)}
+                  className="appearance-none bg-transparent text-white/90 text-sm font-medium px-3 py-1 pr-8 outline-none cursor-pointer w-[160px] truncate hover:text-white transition-colors"
+                >
+                  {maps.map(m => (
+                    <option key={m.id} value={m.id} className="bg-[#1A1C21] text-white">
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-white/50 group-hover:text-white transition-colors">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </div>
+              </div>
+              
+              <div className="w-px h-5 mx-1 bg-white/10" />
+              
+              <button 
+                onClick={handleCreateMap} 
+                className="w-7 h-7 flex items-center justify-center text-blue-400 hover:bg-white/10 hover:text-blue-300 rounded-md transition-all cursor-pointer" 
+                title="Tạo MindMap mới"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+              </button>
+              <button 
+                onClick={handleRenameMap} 
+                className="w-7 h-7 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 rounded-md transition-all cursor-pointer" 
+                title="Đổi tên MindMap"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+              </button>
+            </div>
 
-          <div className="px-3 py-1 bg-white/5 rounded border border-white/10 text-xs flex items-center gap-2 text-white">
-            <div className="w-2 h-2 rounded-full bg-green-500"></div> Runtime: Active
+            {/* Undo/Redo Button Group */}
+            <div className="flex items-center gap-1 bg-black/20 border border-white/5 rounded-lg p-1 shadow-inner">
+              <button
+                onClick={(e) => { e.stopPropagation(); undo(); }}
+                disabled={history.length === 0}
+                className={`w-7 h-7 flex items-center justify-center rounded-md transition-all ${
+                  history.length === 0 
+                    ? 'text-white/20 cursor-not-allowed' 
+                    : 'text-white/70 hover:bg-white/10 hover:text-white cursor-pointer active:scale-95'
+                }`}
+                title="Hoàn tác (Ctrl+Z)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 7v6h6"/>
+                  <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+                </svg>
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); redo(); }}
+                disabled={future.length === 0}
+                className={`w-7 h-7 flex items-center justify-center rounded-md transition-all ${
+                  future.length === 0 
+                    ? 'text-white/20 cursor-not-allowed' 
+                    : 'text-white/70 hover:bg-white/10 hover:text-white cursor-pointer active:scale-95'
+                }`}
+                title="Làm lại (Ctrl+Y)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 7v6h-6"/>
+                  <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/>
+                </svg>
+              </button>
+            </div>
+
+            {/* Status Indicator */}
+            <div className="hidden md:flex px-3 py-1.5 bg-white/5 rounded-lg border border-white/5 text-xs items-center gap-2 text-white/70 font-medium shadow-inner">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              Active
+            </div>
+            
+            {/* Presentation Button */}
+            <button
+              onClick={startPresentation}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/30 hover:text-green-300 text-sm font-semibold rounded-lg transition-all shadow-lg cursor-pointer"
+              title="Bắt đầu Trình chiếu"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              Trình chiếu
+            </button>
+
+            {/* Import JSON Button */}
+            <button
+              onClick={handleOpenImport}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600/30 hover:text-amber-300 text-sm font-semibold rounded-lg transition-all shadow-lg cursor-pointer"
+              title="Nhập dữ liệu sơ đồ từ chuỗi JSON"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v14M19 9l-7 7-7-7M5 20h14"/>
+              </svg>
+              Nhập JSON
+            </button>
+
+            {/* Export JSON Button */}
+            <button
+              onClick={handleOpenExport}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-600/20 text-purple-400 border border-purple-500/30 hover:bg-purple-600/30 hover:text-purple-300 text-sm font-semibold rounded-lg transition-all shadow-lg cursor-pointer"
+              title="Trích xuất cấu trúc sơ đồ thành chuỗi JSON"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <line x1="21" y1="12" x2="9" y2="12"/>
+                <line x1="12" y1="21" x2="12" y2="9"/>
+              </svg>
+              Xuất JSON
+            </button>
+
+            {/* Export Button */}
+            <button 
+              onClick={handleExportWord}
+              disabled={isExporting}
+              className={`flex items-center gap-2 px-5 py-2 text-white text-sm font-semibold rounded-lg transition-all shadow-lg cursor-pointer ${
+                isExporting 
+                  ? 'bg-blue-900/50 cursor-not-allowed text-white/50' 
+                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 hover:shadow-blue-500/25 hover:-translate-y-0.5'
+              }`}
+            >
+              {isExporting ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Đang xuất...
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                  Export Word
+                </>
+              )}
+            </button>
+            </div>
+
+            {/* Collapse Button */}
+            <div className="shrink-0 pl-2 border-l border-white/10 flex items-center">
+              <button
+                onClick={(e) => { e.stopPropagation(); setIsNavCollapsed(true); }}
+                className="w-8 h-8 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+                title="Thu gọn Menu"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+              </button>
+            </div>
+            
           </div>
-          
-          <button 
-            onClick={handleExportWord}
-            disabled={isExporting}
-            className={`px-4 py-1 text-white text-xs font-medium rounded transition-colors ${
-              isExporting ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500'
-            }`}
-          >
-            {isExporting ? 'Đang xuất Word...' : 'Export to Word'}
-          </button>
-          
+        </div>
+
+        {/* Nội dung Navbar khi thu gọn */}
+        <div className={`absolute inset-0 flex items-center justify-center transition-opacity duration-300 ${isNavCollapsed ? 'opacity-100 delay-150' : 'opacity-0 pointer-events-none'}`}>
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-white bg-gradient-to-br from-blue-500 to-purple-600 shadow-[0_0_15px_rgba(59,130,246,0.4)] group">
+            <span className="font-heading text-base group-hover:hidden">M</span>
+            <svg className="hidden group-hover:block" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
         </div>
       </nav>
 
-      <div className="flex flex-1 min-h-0">
-        <main className="relative flex-1 cursor-grab active:cursor-grabbing bg-[#0F1115]">
-          {/* BÍ QUYẾT: Thuộc tính key giúp React tự đập đi xây lại Canvas khi đổi map */}
-          <Canvas key={currentMapId} mapId={currentMapId} />
-        </main>
-      </div>
+      {/* Canvas Area */}
+      <main className="absolute inset-0 cursor-grab active:cursor-grabbing">
+        {/* BÍ QUYẾT: Thuộc tính key giúp React tự đập đi xây lại Canvas khi đổi map */}
+        <Canvas key={currentMapId} mapId={currentMapId} />
+      </main>
+
+      {/* Presentation Overlay */}
+      {isPresenting && (
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-black/80 backdrop-blur-xl border border-white/10 px-6 py-3 rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.8)] z-50 transition-all animate-in slide-in-from-bottom-10 fade-in">
+          
+          <button
+            onClick={stopPresentation}
+            className="flex items-center gap-2 px-4 py-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-red-300 rounded-lg text-sm font-medium transition-colors"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            Thoát (ESC)
+          </button>
+
+          <div className="w-px h-8 bg-white/10 mx-2"></div>
+
+          <button
+            onClick={prevSlide}
+            disabled={presentationIndex === 0}
+            className={`p-2 rounded-lg transition-colors ${
+              presentationIndex === 0 ? 'text-white/20 cursor-not-allowed' : 'text-white/80 hover:bg-white/10 hover:text-white cursor-pointer'
+            }`}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+
+          <div className="min-w-[120px] text-center font-mono text-sm tracking-widest text-white/90 bg-white/5 px-4 py-1.5 rounded-lg border border-white/5">
+            {presentationIndex + 1} / {presentationNodes.length}
+          </div>
+
+          <button
+            onClick={nextSlide}
+            disabled={presentationIndex === presentationNodes.length - 1}
+            className={`p-2 rounded-lg transition-colors ${
+              presentationIndex === presentationNodes.length - 1 ? 'text-white/20 cursor-not-allowed' : 'text-white/80 hover:bg-white/10 hover:text-white cursor-pointer'
+            }`}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+      )}
+
+      {/* Modal Xuất JSON */}
+      {isExportJsonOpen && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-md z-[100] animate-in fade-in duration-300">
+          <div className="w-[90%] max-w-2xl bg-[#0f1115]/95 border border-white/10 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 animate-in zoom-in-95 duration-300">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1"/><path d="M18 8h4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-1"/></svg>
+                Trích xuất JSON của Sơ đồ
+              </h2>
+              <button 
+                onClick={() => setIsExportJsonOpen(false)}
+                className="text-white/50 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-colors cursor-pointer"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+            
+            <p className="text-xs text-white/60">
+              Dưới đây là cấu trúc dữ liệu JSON của sơ đồ hiện tại. Bạn có thể sao chép hoặc tải về tệp tin để chia sẻ hoặc lưu trữ.
+            </p>
+
+            <div className="relative flex-1 min-h-[250px]">
+              <textarea
+                readOnly
+                value={JSON.stringify({ nodes, connections }, null, 2)}
+                className="w-full h-full min-h-[250px] bg-black/40 border border-white/5 p-4 rounded-xl font-mono text-xs text-blue-300 select-all outline-none resize-none overflow-y-auto"
+              />
+            </div>
+
+            <div className="flex items-center justify-between mt-2">
+              <button
+                onClick={handleDownloadJson}
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-white text-sm font-semibold rounded-xl border border-white/10 transition-all cursor-pointer active:scale-95"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                Tải file .json
+              </button>
+              
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCopyJson}
+                  className={`flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer active:scale-95 ${
+                    copied 
+                      ? 'bg-green-600 text-white' 
+                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/20'
+                  }`}
+                >
+                  {copied ? (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                      Đã sao chép!
+                    </>
+                  ) : (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                      Sao chép JSON
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setIsExportJsonOpen(false)}
+                  className="px-5 py-2 bg-white/5 hover:bg-white/10 text-white text-sm font-semibold rounded-xl border border-white/5 transition-all cursor-pointer"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Nhập JSON */}
+      {isImportJsonOpen && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-md z-[100] animate-in fade-in duration-300">
+          <div className="w-[90%] max-w-2xl bg-[#0f1115]/95 border border-white/10 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 animate-in zoom-in-95 duration-300">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                Nhập Sơ đồ từ JSON
+              </h2>
+              <button 
+                onClick={() => setIsImportJsonOpen(false)}
+                className="text-white/50 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-colors cursor-pointer"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+            
+            <p className="text-xs text-white/60">
+              Dán đoạn mã JSON của sơ đồ vào khung bên dưới, hoặc bấm chọn tệp tin JSON từ máy tính của bạn.
+            </p>
+
+            {/* File upload area */}
+            <div className="flex items-center gap-3 bg-white/5 border border-white/5 px-4 py-3 rounded-xl">
+              <label className="text-xs text-white/50 font-medium">Chọn tệp tin .json:</label>
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleFileUpload}
+                className="block w-full text-xs text-white/70 file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-600/20 file:text-blue-400 hover:file:bg-blue-600/30 file:cursor-pointer cursor-pointer"
+              />
+            </div>
+
+            <div className="relative flex-1 min-h-[200px]">
+              <textarea
+                placeholder='Dán chuỗi JSON sơ đồ vào đây... Ví dụ: {"nodes": [...], "connections": [...] }'
+                value={importText}
+                onChange={(e) => handleTextareaChange(e.target.value)}
+                className="w-full h-full min-h-[200px] bg-black/40 border border-white/5 p-4 rounded-xl font-mono text-xs text-white placeholder-white/20 outline-none resize-none overflow-y-auto focus:border-blue-500/50 transition-colors"
+              />
+            </div>
+
+            {/* Validation Message */}
+            {validationError ? (
+              <div className="flex gap-2 items-start bg-red-500/10 border border-red-500/20 px-4 py-2.5 rounded-xl text-xs text-red-400">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="shrink-0 mt-0.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <div>
+                  <span className="font-bold">Lỗi định dạng: </span>
+                  {validationError}
+                </div>
+              </div>
+            ) : importText.trim() ? (
+              <div className="flex gap-2 items-center bg-green-500/10 border border-green-500/20 px-4 py-2.5 rounded-xl text-xs text-green-400">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Dữ liệu JSON hợp lệ và sẵn sàng render.</span>
+              </div>
+            ) : null}
+
+            <div className="flex justify-end gap-2 mt-2">
+              <button
+                onClick={() => setIsImportJsonOpen(false)}
+                className="px-5 py-2 bg-white/5 hover:bg-white/10 text-white text-sm font-semibold rounded-xl border border-white/5 transition-all cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                onClick={handleApplyImport}
+                disabled={!importText.trim() || !!validationError}
+                className={`flex items-center gap-2 px-6 py-2 text-white text-sm font-semibold rounded-xl transition-all cursor-pointer active:scale-95 ${
+                  !importText.trim() || !!validationError
+                    ? 'bg-blue-900/40 text-white/40 cursor-not-allowed border border-white/5'
+                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-lg shadow-blue-500/20'
+                }`}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                Áp dụng sơ đồ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

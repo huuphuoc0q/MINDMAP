@@ -16,6 +16,86 @@ interface EditorNodeProps {
   onToggleCollapse: (nodeId: string, e: React.PointerEvent) => void; // <--- THÊM DÒNG NÀY
 }
 
+// Helper function to split a DOM element at a specific boundary container and offset
+const splitElementAt = (element: HTMLElement, container: Node, offset: number): HTMLElement | null => {
+  let splitNode = container;
+  if (container.nodeType === Node.TEXT_NODE) {
+    const textNode = container as Text;
+    splitNode = textNode.splitText(offset);
+  }
+  
+  const rightElement = element.cloneNode(false) as HTMLElement;
+  element.parentNode?.insertBefore(rightElement, element.nextSibling);
+  
+  let curr: Node | null = splitNode;
+  while (curr) {
+    const next: Node | null = curr.nextSibling;
+    rightElement.appendChild(curr);
+    curr = next;
+  }
+  
+  return rightElement;
+};
+
+// Helper functions to get and set character offset within a contenteditable element
+const getSelectionCharacterOffset = (element: HTMLElement) => {
+  let start = 0;
+  let end = 0;
+  const doc = element.ownerDocument || document;
+  const win = doc.defaultView || window;
+  const sel = win.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    const preCaretRange = range.cloneRange();
+    preCaretRange.selectNodeContents(element);
+    preCaretRange.setEnd(range.startContainer, range.startOffset);
+    start = preCaretRange.toString().length;
+    preCaretRange.setEnd(range.endContainer, range.endOffset);
+    end = preCaretRange.toString().length;
+  }
+  return { start, end };
+};
+
+const setSelectionCharacterOffset = (element: HTMLElement, start: number, end: number) => {
+  const doc = element.ownerDocument || document;
+  const win = doc.defaultView || window;
+  const sel = win.getSelection();
+  if (!sel) return;
+  
+  let charIndex = 0;
+  const range = doc.createRange();
+  range.setStart(element, 0);
+  range.collapse(true);
+  
+  const nodeStack: Node[] = [element];
+  let node: Node | undefined;
+  let foundStart = false;
+  let foundEnd = false;
+  
+  while ((node = nodeStack.pop()) && !(foundStart && foundEnd)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const nextCharIndex = charIndex + node.textContent!.length;
+      if (!foundStart && start >= charIndex && start <= nextCharIndex) {
+        range.setStart(node, start - charIndex);
+        foundStart = true;
+      }
+      if (!foundEnd && end >= charIndex && end <= nextCharIndex) {
+        range.setEnd(node, end - charIndex);
+        foundEnd = true;
+      }
+      charIndex = nextCharIndex;
+    } else {
+      let i = node.childNodes.length;
+      while (i--) {
+        nodeStack.push(node.childNodes[i]);
+      }
+    }
+  }
+  
+  sel.removeAllRanges();
+  sel.addRange(range);
+};
+
 export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
   node,
   level, 
@@ -79,6 +159,158 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
     }
   }, [node.content, isEditing]);
 
+  const toggleHighlight = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+
+    // Tìm kiếm phần tử cha gần nhất có class 'editor-highlight' trong vùng chỉnh sửa này
+    const getHighlightAncestor = (node: Node | null): HTMLElement | null => {
+      let curr = node;
+      while (curr && curr !== contentRef.current) {
+        if (curr instanceof HTMLElement && curr.classList.contains('editor-highlight')) {
+          return curr;
+        }
+        curr = curr.parentNode;
+      }
+      return null;
+    };
+
+    // Kiểm tra xem điểm bắt đầu hoặc điểm kết thúc của vùng chọn có nằm trong vùng highlight không
+    const highlightSpan = getHighlightAncestor(range.startContainer) || getHighlightAncestor(range.endContainer);
+
+    if (highlightSpan) {
+      // TẮT HIGHLIGHT:
+      const parent = highlightSpan.parentNode;
+      if (parent) {
+        if (range.collapsed) {
+          // Trường hợp A: Con trỏ nhấp nháy. Chia đôi thẻ span và chèn ZWSP ở giữa
+          const rightSpan = splitElementAt(highlightSpan, range.startContainer, range.startOffset);
+          
+          const normalText = document.createTextNode('\u200B');
+          parent.insertBefore(normalText, rightSpan);
+          
+          // Xóa các thẻ rỗng nếu có
+          if (highlightSpan.textContent === '' || highlightSpan.textContent === '\u200B') {
+            parent.removeChild(highlightSpan);
+          }
+          if (rightSpan && (rightSpan.textContent === '' || rightSpan.textContent === '\u200B')) {
+            parent.removeChild(rightSpan);
+          }
+
+          // Đặt con trỏ chuột trực tiếp vào kí tự ZWSP mới tạo ngoài thẻ span
+          const sel = window.getSelection();
+          if (sel) {
+            const newRange = document.createRange();
+            newRange.setStart(normalText, 1);
+            newRange.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(newRange);
+          }
+        } else {
+          // Trường hợp B: Bôi đen một đoạn chữ. Chia làm 3 phần và unwrap phần giữa
+          // 1. Lưu lại vùng chọn hiện tại dưới dạng offset ký tự
+          const savedOffset = contentRef.current ? getSelectionCharacterOffset(contentRef.current) : null;
+
+          // Bước 1: Tách phần sau vùng chọn ra trước (chia tại endContainer, endOffset)
+          const rightSpan = splitElementAt(highlightSpan, range.endContainer, range.endOffset);
+          
+          // Bước 2: Tách phần vùng chọn ra khỏi phần trước (chia tại startContainer, startOffset)
+          const midSpan = splitElementAt(highlightSpan, range.startContainer, range.startOffset);
+          
+          if (midSpan) {
+            // Unwrap midSpan (phần được bôi đen cần bỏ highlight)
+            const frag = document.createDocumentFragment();
+            while (midSpan.firstChild) {
+              frag.appendChild(midSpan.firstChild);
+            }
+            parent.replaceChild(frag, midSpan);
+          }
+          
+          // Xóa các thẻ rỗng nếu có
+          if (highlightSpan.textContent === '' || highlightSpan.textContent === '\u200B') {
+            parent.removeChild(highlightSpan);
+          }
+          if (rightSpan && (rightSpan.textContent === '' || rightSpan.textContent === '\u200B')) {
+            parent.removeChild(rightSpan);
+          }
+
+          // Gộp các text node kề nhau để giữ DOM sạch sẽ
+          if (parent instanceof HTMLElement) {
+            parent.normalize();
+          }
+
+          // Khôi phục lại chính xác vị trí con trỏ cho trường hợp bôi đen
+          if (contentRef.current && savedOffset) {
+            setSelectionCharacterOffset(contentRef.current, savedOffset.start, savedOffset.end);
+          }
+        }
+
+        // Cập nhật lại state của Node
+        if (contentRef.current) {
+          onChange(node.id, contentRef.current.innerHTML);
+        }
+      }
+    } else {
+      // BẬT HIGHLIGHT: In đậm màu vàng cam hổ phách
+      if (range.collapsed) {
+        // Nếu chỉ đặt con trỏ (không chọn text), tạo một thẻ span rỗng chứa ký tự zero-width space để giữ con trỏ
+        const span = document.createElement('span');
+        span.className = 'editor-highlight';
+        span.style.color = '#F59E0B';
+        span.style.fontWeight = 'bold';
+        span.innerHTML = '&#8203;'; // zero-width space
+        
+        range.insertNode(span);
+        
+        // Di chuyển con trỏ vào bên trong thẻ span mới tạo
+        const newRange = document.createRange();
+        newRange.setStart(span.firstChild!, 1);
+        newRange.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(newRange);
+      } else {
+        // Nếu có chọn text: bọc vùng chọn bằng thẻ span highlight mới
+        const span = document.createElement('span');
+        span.className = 'editor-highlight';
+        span.style.color = '#F59E0B';
+        span.style.fontWeight = 'bold';
+        
+        try {
+          range.surroundContents(span);
+        } catch (e) {
+          // Trường hợp vùng chọn đi qua nhiều thẻ HTML khác nhau, dùng extractContents để trích xuất rồi bọc
+          const content = range.extractContents();
+          span.appendChild(content);
+          range.insertNode(span);
+        }
+
+        // Loại bỏ mọi thẻ highlight con nằm bên trong thẻ vừa tạo để tránh lồng nhau (flatten)
+        span.querySelectorAll('.editor-highlight').forEach(el => {
+          const p = el.parentNode;
+          if (p) {
+            const frag = document.createDocumentFragment();
+            while (el.firstChild) {
+              frag.appendChild(el.firstChild);
+            }
+            p.replaceChild(frag, el);
+          }
+        });
+
+        // Bôi đen lại toàn bộ thẻ span vừa tạo
+        const newRange = document.createRange();
+        newRange.selectNodeContents(span);
+        selection.removeAllRanges();
+        selection.addRange(newRange);
+
+        // Cập nhật lại state của Node
+        if (contentRef.current) {
+          onChange(node.id, contentRef.current.innerHTML);
+        }
+      }
+    }
+  };
+
   const handlePointerDown = (e: React.PointerEvent) => {
     // Chặn sự kiện truyền tải ra Canvas (để chặn hành vi Pan không mong muốn khi click Node)
     e.stopPropagation();
@@ -104,10 +336,9 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
     <div
       ref={ref}
       data-node-id={node.id}
-      // SỬA Ở DÒNG NÀY: Xóa transition-all, đổi thành transition-shadow
-      className={`absolute bg-[#1A1C21] rounded-xl transition-shadow duration-200 group
-        ${isEditing ? 'node-editing ring-1 ring-blue-500/50 z-20 cursor-text' : `node-shadow border-2 ${nodeThemeClass} z-10 cursor-grab hover:shadow-2xl`}
-        ${isSelected && !isEditing ? 'ring-2 ring-white/50' : ''}
+      className={`absolute bg-[#12141A]/95 backdrop-blur-md rounded-2xl transition-[box-shadow,transform,background-color,border-color,outline] duration-300 group
+        ${isEditing ? 'node-editing ring-2 ring-blue-500/60 z-20 cursor-text' : `node-shadow border-[1.5px] ${nodeThemeClass} z-10 cursor-grab hover:-translate-y-1 hover:shadow-[0_20px_40px_rgba(0,0,0,0.6)]`}
+        ${isSelected && !isEditing ? 'ring-2 ring-white/40 ring-offset-2 ring-offset-[#09090b]' : ''}
       `}
       style={{
         left: node.x,
@@ -173,12 +404,23 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
         ref={contentRef}
         contentEditable={isEditing}
         suppressContentEditableWarning
-        // className="outline-none pt-8 pb-4 px-4 w-full h-full text-[#E0E0E0] break-words rounded-xl"
         className="editor-content outline-none pt-8 pb-4 px-4 w-full h-full text-[#E0E0E0] break-words rounded-xl"
         style={{
           userSelect: isEditing ? 'text' : 'none',
           WebkitUserSelect: isEditing ? 'text' : 'none',
           cursor: isEditing ? 'text' : 'auto'
+        }}
+        onKeyDown={(e) => {
+          // Bắt phím tắt Ctrl+B để in đậm thông thường
+          if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+            e.preventDefault();
+            document.execCommand('bold', false);
+          }
+          // Bắt phím tắt Ctrl+H để kích hoạt Highlight in đậm màu vàng
+          else if ((e.ctrlKey || e.metaKey) && e.key === 'h') {
+            e.preventDefault();
+            toggleHighlight();
+          }
         }}
         onPaste={(e) => {
           e.preventDefault(); // Chặn hành vi dán nguyên bản (kèm HTML/CSS) của trình duyệt

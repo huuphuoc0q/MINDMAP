@@ -1,25 +1,31 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif, "Arial";
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Outfit", ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer utilities {
 
-  .node-shadow {
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1);
-  }
-  .node-editing {
-    box-shadow: 0 0 0 2px #3B82F6, 0 10px 40px rgba(59,130,246,0.2);
+  .glass-panel {
+    @apply bg-[#12141A]/70 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_#00000066];
   }
 
-  /* --- THÊM KHỐI NÀY VÀO: Phục hồi định dạng cho Bullet List --- */
+  .node-shadow {
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .node-editing {
+    box-shadow: 0 0 0 2px #3B82F6, 0 12px 40px rgba(59, 130, 246, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  /* Phục hồi định dạng cho Bullet List */
   .editor-content ul {
     list-style-type: disc !important;
     padding-left: 1.5rem !important;
   }
-  
+
   .editor-content ol {
     list-style-type: decimal !important;
     padding-left: 1.5rem !important;
@@ -28,22 +34,17 @@
   .editor-content li {
     margin-top: 0.25rem;
   }
-  /* ... (Các code cũ giữ nguyên) ... */
 
-  /* 1. Ép chữ in đậm sang vàng cam (LOẠI TRỪ các thẻ bị trình duyệt ép về normal) */
-  .editor-content b:not([style*="normal"]):not([style*="400"]),
-  .editor-content strong:not([style*="normal"]):not([style*="400"]) {
-    color: #F59E0B !important; 
-    font-weight: 800 !important; 
+  /* Phong cách Highlight Cam Hổ Phách cao cấp (Amber Glow) */
+  .editor-content .editor-highlight {
+    background-color: rgba(245, 158, 11, 0.15) !important;
+    color: #F59E0B !important;
+    font-weight: bold !important;
+    padding: 1px 5px !important;
+    border-radius: 4px !important;
+    border: 1px solid rgba(245, 158, 11, 0.3) !important;
+    margin: 0 2px !important;
+    box-decoration-break: clone !important;
+    -webkit-box-decoration-break: clone !important;
   }
-
-  /* 2. Sửa lỗi "dính chùm" màu cam: Trả về ĐÚNG MÀU TRẮNG XÁM thay vì inherit */
-  .editor-content b[style*="normal"],
-  .editor-content strong[style*="normal"],
-  .editor-content span[style*="font-weight: normal"],
-  .editor-content span[style*="font-weight: 400"] {
-    color: #E0E0E0 !important; /* <-- ĐÃ SỬA DÒNG NÀY (Thay inherit bằng #E0E0E0) */
-    font-weight: normal !important;
-  }
-  /* ----------------------------------------------------------- */
 }

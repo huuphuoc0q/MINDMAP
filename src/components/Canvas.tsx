@@ -86,7 +86,51 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
         return;
       }
 
-      // 4. Delete or Backspace
+      // 4. Enter key pressed (exactly one node selected)
+      if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+        if (state.selectedNodeIds.length === 1) {
+          e.preventDefault();
+          const parentId = state.selectedNodeIds[0];
+          const parentNode = state.nodes.find(n => n.id === parentId);
+          if (parentNode) {
+            const parentChildren = state.connections.filter(c => c.source === parentId);
+            const childCount = parentChildren.length;
+            
+            const newNodeWidth = 250;
+            const newNodeHeight = 100;
+            const x = parentNode.x + parentNode.width + 120;
+            
+            // Alternating vertical offset to avoid overlap
+            let y = parentNode.y + (parentNode.height / 2) - (newNodeHeight / 2);
+            if (childCount > 0) {
+              const direction = childCount % 2 === 0 ? 1 : -1;
+              const step = Math.ceil(childCount / 2);
+              y += direction * step * 130;
+            }
+            
+            state.saveSnapshot();
+            
+            const childId = `n${Date.now()}`;
+            const newChildNode: MindNodeData = {
+              id: childId,
+              x,
+              y,
+              width: newNodeWidth,
+              height: newNodeHeight,
+              content: 'Ý tưởng con mới...',
+            };
+            
+            state.addNode(newChildNode);
+            state.addConnection(parentId, childId);
+            
+            // Focus and edit the child node immediately
+            state.setSelectedNodeIds([childId]);
+            state.setEditNodeId(childId);
+          }
+        }
+      }
+
+      // 5. Delete or Backspace
       if (e.key === 'Delete' || e.key === 'Backspace') {
         deleteSelected();
       }

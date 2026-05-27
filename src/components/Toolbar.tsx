@@ -24,7 +24,7 @@ export function FloatingToolbar({ x, y }: FloatingToolbarProps) {
     }
 
     document.execCommand(command, false, value);
-    
+
     if (command === 'foreColor') setShowColors(false);
     if (command === 'fontSize') setShowSizes(false); // Đóng menu size sau khi chọn
   };
@@ -33,7 +33,7 @@ export function FloatingToolbar({ x, y }: FloatingToolbarProps) {
   // const handleMouseDown = (e: React.MouseEvent) => {
   //   e.preventDefault();
   // };
-// Đổi tên và thêm stopPropagation
+  // Đổi tên và thêm stopPropagation
   const handleToolbarInteraction = (e: React.MouseEvent | React.PointerEvent) => {
     e.preventDefault(); // Giữ nguyên vùng bôi đen chữ
     e.stopPropagation(); // CỰC KỲ QUAN TRỌNG: Chặn sự kiện lan ra ngoài Canvas
@@ -73,15 +73,15 @@ export function FloatingToolbar({ x, y }: FloatingToolbarProps) {
       >
         <Underline size={16} />
       </button>
-      
+
       <div className="w-px h-4 mx-1 bg-white/10" />
-      
+
       <div className="relative flex items-center">
         <button
           type="button"
           // Đổi từ onClick sang onMouseDown
           onMouseDown={(e) => {
-            e.preventDefault(); 
+            e.preventDefault();
             e.stopPropagation();
             setShowColors(!showColors);
           }}
@@ -115,11 +115,11 @@ export function FloatingToolbar({ x, y }: FloatingToolbarProps) {
           </div>
         )}
       </div>
-<div className="relative flex items-center">
+      <div className="relative flex items-center">
         <button
           type="button"
           onMouseDown={(e) => {
-            e.preventDefault(); 
+            e.preventDefault();
             e.stopPropagation();
             setShowSizes(!showSizes);
             setShowColors(false); // Tự đóng bảng màu nếu đang mở

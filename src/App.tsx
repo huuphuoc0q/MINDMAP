@@ -86,7 +86,7 @@
 
 //   const handleExportWord = async () => {
 //     setIsExporting(true);
-    
+
 //     try {
 //       // 1. Lấy dữ liệu mới nhất từ localStorage
 //       const savedNodes = localStorage.getItem('mindnode_nodes');
@@ -233,7 +233,7 @@
 //           <div className="px-3 py-1 bg-white/5 rounded border border-white/10 text-xs flex items-center gap-2 text-white">
 //             <div className="w-2 h-2 rounded-full bg-green-500"></div> Runtime: Active
 //           </div>
-          
+
 //           {/* NÚT XUẤT WORD ĐÃ ĐƯỢC CẬP NHẬT */}
 //           <button 
 //             onClick={handleExportWord}
@@ -244,7 +244,7 @@
 //           >
 //             {isExporting ? 'Đang xuất Word...' : 'Export to Word'}
 //           </button>
-          
+
 //         </div>
 //       </nav>
 
@@ -256,8 +256,9 @@
 //     </div>
 //   );
 // }
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Canvas } from './components/Canvas';
+import { OutlinerPanel } from './components/OutlinerPanel';
 import { useMindMapStore } from './store/useMindMapStore';
 import { exportWordDocument } from './utils/exportWord';
 
@@ -337,6 +338,9 @@ export default function App() {
   const nextSlide = useMindMapStore((state) => state.nextSlide);
   const prevSlide = useMindMapStore((state) => state.prevSlide);
 
+  const isOutlinerOpen = useMindMapStore((state) => state.isOutlinerOpen);
+  const toggleOutliner = useMindMapStore((state) => state.toggleOutliner);
+
   const [isExportJsonOpen, setIsExportJsonOpen] = useState(false);
   const [isImportJsonOpen, setIsImportJsonOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -356,12 +360,30 @@ export default function App() {
     localStorage.setItem('mindnode_map_index', JSON.stringify(maps));
   }, [maps]);
 
+  // Custom Dropdown State & Outside Click Handler
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDropdownOpen]);
+
   const handleDownloadJson = () => {
     const dataStr = JSON.stringify({ nodes, connections }, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-    
+    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+
     const exportFileDefaultName = `So_Do_${maps.find(m => m.id === currentMapId)?.name || 'default'}_${Date.now()}.json`;
-    
+
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', exportFileDefaultName);
@@ -412,7 +434,7 @@ export default function App() {
         if (event.target && typeof event.target.result === 'string') {
           const content = event.target.result;
           setImportText(content);
-          
+
           try {
             const parsed = JSON.parse(content);
             const validation = validateMindMapJSON(parsed);
@@ -456,7 +478,7 @@ export default function App() {
         setValidationError(validation.error || 'Dữ liệu JSON không hợp lệ.');
         return;
       }
-      
+
       importMapData(parsed.nodes, parsed.connections || []);
       setIsImportJsonOpen(false);
       setImportText('');
@@ -479,7 +501,7 @@ export default function App() {
   const handleCopyPrompt = async () => {
     const promptText = `Hãy đóng vai trò là một chuyên gia thiết kế Sơ đồ tư duy (MindMap) và tạo ra dữ liệu cấu trúc dưới dạng JSON chuẩn xác nhất cho ứng dụng **MindNode Canvas**.
 
-Nhiệm vụ của bạn là chuyển đổi chủ đề/kiến thức được yêu cầu thành một sơ đồ tư duy có cấu trúc phân cấp thông minh, rõ ràng và cân đối.
+Nhiệm vụ của bạn là chuyển đổi chủ đề/kiến thức được yêu cầu thành một sơ đồ tư duy có cấu trúc phân cấp rõ ràng (gồm nhiều cấp, Chủ đề chính -> Nhánh cấp 1 -> Nhánh cấp 2 -> Nhánh cấp 3...).
 
 Dữ liệu JSON đầu ra bắt buộc phải tuân thủ nghiêm ngặt định dạng cấu trúc sau:
 
@@ -507,34 +529,21 @@ Dữ liệu JSON đầu ra bắt buộc phải tuân thủ nghiêm ngặt địn
 }
 \`\`\`
 
-### 📌 NGUYÊN TẮC PHÂN CẤP LINH HOẠT & MODULAR (TRÁNH RỐI MẮT):
-1. **Độ sâu linh hoạt (Few/Many Levels)**: Không cố định số cấp cho mọi nhánh. Hãy tùy biến độ sâu của từng nhánh dựa trên độ phức tạp của nội dung:
-   - Các nhánh đơn giản (ví dụ: Ví dụ thực tế, ghi chú phụ, định nghĩa ngắn) chỉ nên có 1 - 2 cấp.
-   - Các nhánh lý thuyết cốt lõi hoặc quy trình phức tạp có thể chia sâu từ 3 - 5 cấp.
-2. **Chia nhỏ khối nội dung (Multiple Sub-blocks)**: TUYỆT ĐỐI KHÔNG dồn ép quá nhiều ý, danh sách dài hay các khối chữ lớn vào trong một Node duy nhất làm rối mắt và tràn viền.
-   - Thay vì tạo 1 Node chứa danh sách 5-10 dòng chữ, hãy chia nhỏ nội dung đó thành 1 Node cha (chứa tiêu đề/tóm tắt khái quát) và tách 5-10 ý chi tiết kia thành 5-10 Node con tương ứng kết nối với Node cha.
-   - Giới hạn từ ngữ: Mỗi Node chỉ nên chứa tối đa 20 - 30 từ, sử dụng thẻ \`<br/>\` để ngắt dòng hợp lý giúp chiều rộng thẻ luôn thon gọn (~250px đến ~300px).
-
-### 📌 QUY TẮC PHÂN BỔ TỌA ĐỘ (X, Y) ĐỂ TRANH CHỒNG ĐÈ:
-Bạn phải tự động tính toán tọa độ (x, y) cho từng Node theo nguyên tắc phân nhánh từ trái qua phải một cách có tính toán chiều cao của các nhánh con (Sub-tree Height):
-1. **Phân bố trục X (Phân cấp)**:
-   - Gốc (Root): \`x: 100\`.
-   - Nhánh cấp 1 (Level 1): \`x: 480\` (khoảng cách \`+380px\` để chừa không gian kết nối thoải mái).
-   - Nhánh cấp 2 (Level 2): \`x: 860\` (khoảng cách \`+380px\`).
-   - Nhánh cấp 3 (Level 3): \`x: 1240\` (khoảng cách \`+380px\`).
-   - Nhánh cấp 4 (Level 4): \`x: 1620\`.
-2. **Phân bố trục Y (Tránh đè nhau & Cân đối)**:
-   - Mốc ban đầu của Root nằm ở \`y: 300\`.
-   - Các nhánh con của cùng một Node cha phải được phân bổ đối xứng theo chiều dọc xung quanh tọa độ \`y\` của Node cha.
-   - **Quan trọng**: Nếu một Node con có nhiều con và cháu của riêng nó (một sub-tree lớn), bạn phải chừa ra một khoảng trống dọc rất lớn (Ví dụ: khoảng cách dọc \`y\` với các nhánh anh em kề bên phải tăng từ \`150px\` thông thường lên \`300px\` - \`500px\`) để toàn bộ cụm con cháu của nó không đè lên cụm con cháu của nhánh anh em.
-   - Hãy hình dung tổng thể chiều cao của mỗi nhánh và cộng dồn tọa độ \`y\` lũy tiến một cách hợp lý để tạo ra một bố cục thông thoáng, tuyệt mỹ.
+### 📌 QUY TẮC PHÂN BỔ TỌA ĐỘ (X, Y) ĐỂ TRÁNH TRÙNG LẶP:
+Để sơ đồ hiển thị đẹp mắt, trực quan và không bị chồng chéo lên nhau trên Canvas vô hạn, bạn phải tự động tính toán tọa độ (x, y) cho từng Node theo nguyên tắc phân nhánh từ trái qua phải (hoặc tỏa ra hai bên):
+1. **Gốc (Root - Cấp 0)**: Đặt ở tọa độ gốc, ví dụ: \`x: 100, y: 300\`.
+2. **Nhánh cấp 1 (Level 1)**: Đặt dịch sang bên phải. \`x\` nên tăng thêm khoảng \`350px\` so với root (ví dụ: \`x: 450\`). Tọa độ \`y\` của các nhánh cấp 1 phải phân bổ đều theo chiều dọc xung quanh \`y\` của Root (ví dụ: một nhánh ở \`y: 100\`, một nhánh ở \`y: 300\`, một nhánh ở \`y: 500\`).
+3. **Nhánh cấp 2 (Level 2)**: Tiếp tục dịch sang phải. \`x\` tăng thêm \`350px\` so với nhánh cấp 1 tương ứng (ví dụ: \`x: 800\`). Tọa độ \`y\` phân bổ dọc xung quanh Node cha cấp 1 của nó.
+4. **Nhánh cấp 3 (Level 3)**: Tiếp tục dịch sang phải \`x: 1150\`. Tọa độ \`y\` phân bổ dọc xung quanh Node cha cấp 2.
+*Khoảng cách chiều dọc (y) giữa các node anh em kề nhau tối thiểu phải từ 120px đến 150px để tránh đè lên nhau.*
 
 ### 📌 ĐỊNH DẠNG NỘI DUNG (content) - RẤT QUAN TRỌNG:
 Trường \`content\` hỗ trợ chuỗi HTML để hiển thị văn bản phong phú và định dạng premium:
-1. **Tiêu đề in đậm**: Dùng thẻ \`<b>\` hoặc \`<strong>\` cho các khái niệm hoặc tiêu đề chính (Ví dụ: \`<b>Ý TƯỞNG CỐT LÕI:</b>\`).
+1. **Tiêu đề in đậm**: Dùng thẻ \`<b>\` hoặc \`<strong>\` cho các khái niệm hoặc tiêu đề chính (Ví dụ: \`<b>Ý TƯỞNG 1:</b>\`).
 2. **Xuống dòng**: Dùng thẻ \`<br/>\` để phân tách tiêu đề và mô tả chi tiết giúp thẻ Node không bị quá rộng theo chiều ngang.
 3. **Hiệu ứng Highlight in đậm màu vàng hổ phách**: Để làm nổi bật các từ khóa cực kỳ quan trọng, hãy dùng chính xác thẻ:
    \`<span class="editor-highlight" style="color: rgb(245, 158, 11); font-weight: bold;">từ_khóa_nổi_bật</span>\`
+4. **Danh sách dòng (Bullet list)**: Sử dụng các ký hiệu như \`1. \`, \`2. \` hoặc đầu dòng như \`• \` để cấu trúc thông tin trong các Node có nhiều nội dung chi tiết.
 
 ### 📌 YÊU CẦU ĐỐI VỚI LIÊN KẾT (connections):
 - Mỗi connection phải có một \`id\` duy nhất dạng chuỗi (ví dụ: \`"c1"\`, \`"c2"\`...).
@@ -596,6 +605,26 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
     }
   };
 
+  const handleDeleteMap = (mapIdToDelete: string, mapName: string) => {
+    if (maps.length <= 1) {
+      alert('Bạn phải giữ lại ít nhất một MindMap / Môn học!');
+      return;
+    }
+    if (window.confirm(`Bạn có chắc chắn muốn xóa MindMap "${mapName}"? Tất cả dữ liệu của sơ đồ này sẽ bị xóa vĩnh viễn và không thể khôi phục.`)) {
+      const remainingMaps = maps.filter(m => m.id !== mapIdToDelete);
+      setMaps(remainingMaps);
+      
+      // Nếu đang ở map bị xóa, chuyển sang map khác
+      if (currentMapId === mapIdToDelete) {
+        setCurrentMapId(remainingMaps[0].id);
+      }
+      
+      // Xóa trong LocalStorage
+      localStorage.removeItem(`mindnode_nodes_${mapIdToDelete}`);
+      localStorage.removeItem(`mindnode_connections_${mapIdToDelete}`);
+    }
+  };
+
   // 3. TÍNH NĂNG XUẤT WORD
   const handleExportWord = async () => {
     setIsExporting(true);
@@ -614,14 +643,15 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
 
   return (
     <div className="relative w-screen h-screen bg-[#09090b] text-[#E0E0E0] font-sans overflow-hidden">
-      
-      <nav 
-        className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 glass-panel rounded-2xl transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] overflow-hidden shadow-2xl flex items-center justify-between
-          ${isPresenting ? 'opacity-0 pointer-events-none -translate-y-10' : ''}
-          ${isNavCollapsed && !isPresenting ? 'w-14 h-14 px-0 cursor-pointer hover:bg-white/10' : 'w-[98%] max-w-6xl h-16 px-5'}`}
-        onClick={() => isNavCollapsed && !isPresenting && setIsNavCollapsed(false)}
+
+      <nav
+        className={`absolute top-4 left-1/2 -translate-x-1/2 z-50 glass-panel rounded-2xl transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] shadow-2xl flex items-center justify-between
+          ${isNavCollapsed ? 'overflow-hidden' : 'overflow-visible'}
+          ${(isPresenting || isOutlinerOpen) ? 'opacity-0 pointer-events-none -translate-y-10' : ''}
+          ${isNavCollapsed && !isPresenting && !isOutlinerOpen ? 'w-14 h-14 px-0 cursor-pointer hover:bg-white/10' : 'w-[98%] max-w-6xl h-16 px-5'}`}
+        onClick={() => isNavCollapsed && !isPresenting && !isOutlinerOpen && setIsNavCollapsed(false)}
       >
-        
+
         {/* Nội dung Navbar khi mở rộng */}
         <div className={`flex items-center justify-between w-full h-full transition-opacity duration-300 ${isNavCollapsed ? 'opacity-0 absolute pointer-events-none' : 'opacity-100 relative delay-150'}`}>
           {/* Brand Section */}
@@ -638,156 +668,228 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
               </span>
             </div>
           </div>
-          
+
           {/* Actions Section */}
-          <div className="flex items-center flex-1 justify-end min-w-0">
-            <div 
-              className="flex gap-2 md:gap-3 items-center overflow-x-auto overflow-y-hidden pr-2 py-1 shrink-1 [&::-webkit-scrollbar]:hidden"
-              style={{ scrollbarWidth: 'none' }}
-            >
-              {/* Map Management */}
-            <div className="flex items-center gap-2 bg-black/20 border border-white/5 rounded-lg px-2 py-1.5 shadow-inner">
-              <div className="relative group">
-                <select
-                  value={currentMapId}
-                  onChange={(e) => setCurrentMapId(e.target.value)}
-                  className="appearance-none bg-transparent text-white/90 text-sm font-medium px-3 py-1 pr-8 outline-none cursor-pointer w-[160px] truncate hover:text-white transition-colors"
+          <div className="flex items-center flex-1 justify-end min-w-0 gap-2 md:gap-3 overflow-visible">
+            {/* Map Management */}
+              <div ref={dropdownRef} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-2 py-1.5 shadow-lg relative select-none">
+                {/* Trigger Button */}
+                <button
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                  className="flex items-center gap-2 text-white/90 text-sm font-medium px-2 py-1 rounded-lg outline-none cursor-pointer w-[160px] hover:bg-white/5 hover:text-white transition-all duration-200"
                 >
-                  {maps.map(m => (
-                    <option key={m.id} value={m.id} className="bg-[#1A1C21] text-white">
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-white/50 group-hover:text-white transition-colors">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-                </div>
-              </div>
-              
-              <div className="w-px h-5 mx-1 bg-white/10" />
-              
-              <button 
-                onClick={handleCreateMap} 
-                className="w-7 h-7 flex items-center justify-center text-blue-400 hover:bg-white/10 hover:text-blue-300 rounded-md transition-all cursor-pointer" 
-                title="Tạo MindMap mới"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-              </button>
-              <button 
-                onClick={handleRenameMap} 
-                className="w-7 h-7 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 rounded-md transition-all cursor-pointer" 
-                title="Đổi tên MindMap"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-              </button>
-            </div>
-
-            {/* Undo/Redo Button Group */}
-            <div className="flex items-center gap-1 bg-black/20 border border-white/5 rounded-lg p-1 shadow-inner">
-              <button
-                onClick={(e) => { e.stopPropagation(); undo(); }}
-                disabled={history.length === 0}
-                className={`w-7 h-7 flex items-center justify-center rounded-md transition-all ${
-                  history.length === 0 
-                    ? 'text-white/20 cursor-not-allowed' 
-                    : 'text-white/70 hover:bg-white/10 hover:text-white cursor-pointer active:scale-95'
-                }`}
-                title="Hoàn tác (Ctrl+Z)"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 7v6h6"/>
-                  <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
-                </svg>
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); redo(); }}
-                disabled={future.length === 0}
-                className={`w-7 h-7 flex items-center justify-center rounded-md transition-all ${
-                  future.length === 0 
-                    ? 'text-white/20 cursor-not-allowed' 
-                    : 'text-white/70 hover:bg-white/10 hover:text-white cursor-pointer active:scale-95'
-                }`}
-                title="Làm lại (Ctrl+Y)"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 7v6h-6"/>
-                  <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/>
-                </svg>
-              </button>
-            </div>
-
-            {/* Status Indicator */}
-            <div className="hidden md:flex px-3 py-1.5 bg-white/5 rounded-lg border border-white/5 text-xs items-center gap-2 text-white/70 font-medium shadow-inner">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-              </span>
-              Active
-            </div>
-            
-            {/* Presentation Button */}
-            <button
-              onClick={startPresentation}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600/20 text-green-400 border border-green-500/30 hover:bg-green-600/30 hover:text-green-300 text-sm font-semibold rounded-lg transition-all shadow-lg cursor-pointer"
-              title="Bắt đầu Trình chiếu"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
-              Trình chiếu
-            </button>
-
-            {/* Import JSON Button */}
-            <button
-              onClick={handleOpenImport}
-              className="flex items-center gap-2 px-4 py-2 bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600/30 hover:text-amber-300 text-sm font-semibold rounded-lg transition-all shadow-lg cursor-pointer"
-              title="Nhập dữ liệu sơ đồ từ chuỗi JSON"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2v14M19 9l-7 7-7-7M5 20h14"/>
-              </svg>
-              Nhập JSON
-            </button>
-
-            {/* Export JSON Button */}
-            <button
-              onClick={handleOpenExport}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-600/20 text-purple-400 border border-purple-500/30 hover:bg-purple-600/30 hover:text-purple-300 text-sm font-semibold rounded-lg transition-all shadow-lg cursor-pointer"
-              title="Trích xuất cấu trúc sơ đồ thành chuỗi JSON"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
-                <line x1="12" y1="21" x2="12" y2="9"/>
-              </svg>
-              Xuất JSON
-            </button>
-
-            {/* Export Button */}
-            <button 
-              onClick={handleExportWord}
-              disabled={isExporting}
-              className={`flex items-center gap-2 px-5 py-2 text-white text-sm font-semibold rounded-lg transition-all shadow-lg cursor-pointer ${
-                isExporting 
-                  ? 'bg-blue-900/50 cursor-not-allowed text-white/50' 
-                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 hover:shadow-blue-500/25 hover:-translate-y-0.5'
-              }`}
-            >
-              {isExporting ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400 shrink-0">
+                    <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+                    <path d="M6 6h10M6 10h10"/>
                   </svg>
-                  Đang xuất...
-                </>
-              ) : (
-                <>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                  Export Word
-                </>
-              )}
-            </button>
+                  <span className="truncate flex-1 text-left select-none">
+                    {maps.find(m => m.id === currentMapId)?.name || 'Môn Mặc định'}
+                  </span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={`text-white/40 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-white/80' : ''}`}>
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+
+                {/* Dropdown Menu */}
+                {isDropdownOpen && (
+                  <div className="absolute top-[calc(100%+8px)] left-0 w-[240px] z-[100] bg-[#12141A]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-[0_12px_40px_rgba(0,0,0,0.65)] py-2 px-1.5 flex flex-col gap-1 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="px-2.5 py-1 text-[10px] uppercase tracking-wider text-white/40 font-bold mb-1">
+                      Danh sách sơ đồ ({maps.length})
+                    </div>
+                    <div className="max-h-[220px] overflow-y-auto pr-0.5 flex flex-col gap-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/10 [&::-webkit-scrollbar-thumb]:rounded-full">
+                      {maps.map(m => {
+                        const isSelected = m.id === currentMapId;
+                        return (
+                          <div
+                            key={m.id}
+                            onClick={() => {
+                              setCurrentMapId(m.id);
+                              setIsDropdownOpen(false);
+                            }}
+                            className={`group/item w-full px-2.5 py-2 text-left text-xs rounded-lg transition-all flex items-center justify-between cursor-pointer ${
+                              isSelected
+                                ? 'bg-blue-500/10 text-blue-400 font-semibold border-l-2 border-blue-500 pl-2'
+                                : 'text-white/80 hover:bg-white/5 hover:text-white pl-2.5'
+                            }`}
+                          >
+                            <span className="truncate flex-1 mr-2">{m.name}</span>
+                            
+                            {/* Actions on Item hover */}
+                            <div className="flex items-center gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity shrink-0">
+                              {maps.length > 1 && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteMap(m.id, m.name);
+                                  }}
+                                  className="w-5 h-5 flex items-center justify-center text-white/40 hover:text-red-400 hover:bg-red-500/20 rounded transition-colors"
+                                  title="Xóa MindMap"
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                                  </svg>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="w-px h-5 mx-0.5 bg-white/10" />
+
+                {/* Create Map Button */}
+                <button
+                  onClick={handleCreateMap}
+                  className="w-7 h-7 flex items-center justify-center text-blue-400 hover:bg-white/10 hover:text-blue-300 rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-95"
+                  title="Tạo MindMap mới"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12h14" />
+                    <path d="M12 5v14" />
+                  </svg>
+                </button>
+
+                {/* Rename Map Button */}
+                <button
+                  onClick={handleRenameMap}
+                  className="w-7 h-7 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-all cursor-pointer hover:scale-105 active:scale-95"
+                  title="Đổi tên MindMap này"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                    <path d="m15 5 4 4" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Scrollable buttons wrapper */}
+              <div
+                className="flex gap-2 md:gap-3 items-center overflow-x-auto overflow-y-hidden pr-2 py-1 shrink-1 [&::-webkit-scrollbar]:hidden"
+                style={{ scrollbarWidth: 'none' }}
+              >
+                {/* Undo/Redo Button Group */}
+                <div className="flex items-center gap-1 bg-black/20 border border-white/5 rounded-lg p-1 shadow-inner">
+                <button
+                  onClick={(e) => { e.stopPropagation(); undo(); }}
+                  disabled={history.length === 0}
+                  className={`w-7 h-7 flex items-center justify-center rounded-md transition-all ${history.length === 0
+                    ? 'text-white/20 cursor-not-allowed'
+                    : 'text-white/70 hover:bg-white/10 hover:text-white cursor-pointer active:scale-95'
+                    }`}
+                  title="Hoàn tác (Ctrl+Z)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 7v6h6" />
+                    <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+                  </svg>
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); redo(); }}
+                  disabled={future.length === 0}
+                  className={`w-7 h-7 flex items-center justify-center rounded-md transition-all ${future.length === 0
+                    ? 'text-white/20 cursor-not-allowed'
+                    : 'text-white/70 hover:bg-white/10 hover:text-white cursor-pointer active:scale-95'
+                    }`}
+                  title="Làm lại (Ctrl+Y)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 7v6h-6" />
+                    <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Status Indicator */}
+              <div className="hidden md:flex px-3 py-1.5 bg-white/5 rounded-lg border border-white/5 text-xs items-center gap-2 text-white/70 font-medium shadow-inner">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                </span>
+                Active
+              </div>
+
+              {/* Outliner Toggle */}
+              <button
+                onClick={toggleOutliner}
+                className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-300 cursor-pointer ${isOutlinerOpen
+                  ? 'bg-blue-500/15 text-blue-300 shadow-[0_0_15px_rgba(59,130,246,0.15)]'
+                  : 'text-white/60 hover:bg-white/10 hover:text-white'
+                  }`}
+                title="Bật/Tắt Chế độ Đề cương"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 6h16M4 12h16M4 18h7" />
+                </svg>
+                Biên soạn
+              </button>
+
+              {/* Presentation Button */}
+              <button
+                onClick={startPresentation}
+                className="flex items-center gap-2 px-3 py-1.5 text-white/60 hover:bg-white/10 hover:text-green-300 text-sm font-medium rounded-lg transition-all duration-300 cursor-pointer"
+                title="Bắt đầu Trình chiếu"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="5 3 19 12 5 21 5 3" />
+                </svg>
+                Trình chiếu
+              </button>
+
+              {/* Import JSON Button */}
+              <button
+                onClick={handleOpenImport}
+                className="flex items-center gap-2 px-3 py-1.5 text-white/60 hover:bg-white/10 hover:text-amber-300 text-sm font-medium rounded-lg transition-all duration-300 cursor-pointer"
+                title="Nhập dữ liệu sơ đồ từ chuỗi JSON"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2v14M19 9l-7 7-7-7M5 20h14" />
+                </svg>
+                Nhập JSON
+              </button>
+
+              {/* Export JSON Button */}
+              <button
+                onClick={handleOpenExport}
+                className="flex items-center gap-2 px-3 py-1.5 text-white/60 hover:bg-white/10 hover:text-purple-300 text-sm font-medium rounded-lg transition-all duration-300 cursor-pointer"
+                title="Trích xuất cấu trúc sơ đồ thành chuỗi JSON"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                  <line x1="12" y1="21" x2="12" y2="9" />
+                </svg>
+                Xuất JSON
+              </button>
+
+              <div className="w-px h-5 mx-1 bg-white/10" />
+
+              {/* Export Button */}
+              <button
+                onClick={handleExportWord}
+                disabled={isExporting}
+                className={`flex items-center gap-2 px-4 py-1.5 text-white text-sm font-medium rounded-lg transition-all duration-300 cursor-pointer ${isExporting
+                  ? 'bg-blue-900/50 cursor-not-allowed text-white/50'
+                  : 'bg-white/5 border border-white/10 hover:bg-white/10 hover:shadow-[0_0_20px_rgba(255,255,255,0.05)] hover:-translate-y-0.5'
+                  }`}
+              >
+                {isExporting ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white/50" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Đang xuất...
+                  </>
+                ) : (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" x2="12" y1="15" y2="3" /></svg>
+                    Export Word
+                  </>
+                )}
+              </button>
             </div>
 
             {/* Collapse Button */}
@@ -797,10 +899,10 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
                 className="w-8 h-8 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
                 title="Thu gọn Menu"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6" /></svg>
               </button>
             </div>
-            
+
           </div>
         </div>
 
@@ -808,26 +910,32 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
         <div className={`absolute inset-0 flex items-center justify-center transition-opacity duration-300 ${isNavCollapsed ? 'opacity-100 delay-150' : 'opacity-0 pointer-events-none'}`}>
           <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-white bg-gradient-to-br from-blue-500 to-purple-600 shadow-[0_0_15px_rgba(59,130,246,0.4)] group">
             <span className="font-heading text-base group-hover:hidden">M</span>
-            <svg className="hidden group-hover:block" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            <svg className="hidden group-hover:block" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
           </div>
         </div>
       </nav>
 
-      {/* Canvas Area */}
-      <main className="absolute inset-0 cursor-grab active:cursor-grabbing">
-        {/* BÍ QUYẾT: Thuộc tính key giúp React tự đập đi xây lại Canvas khi đổi map */}
-        <Canvas key={currentMapId} mapId={currentMapId} />
+      {/* Workspace Area: Split Screen */}
+      <main className="absolute inset-0 flex">
+        {isOutlinerOpen ? (
+          <OutlinerPanel />
+        ) : (
+          <div className="flex-1 relative cursor-grab active:cursor-grabbing">
+            {/* BÍ QUYẾT: Thuộc tính key giúp React tự đập đi xây lại Canvas khi đổi map */}
+            <Canvas key={currentMapId} mapId={currentMapId} />
+          </div>
+        )}
       </main>
 
       {/* Presentation Overlay */}
       {isPresenting && (
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-black/80 backdrop-blur-xl border border-white/10 px-6 py-3 rounded-2xl shadow-[0_0_40px_rgba(0,0,0,0.8)] z-50 transition-all animate-in slide-in-from-bottom-10 fade-in">
-          
+
           <button
             onClick={stopPresentation}
             className="flex items-center gap-2 px-4 py-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 hover:text-red-300 rounded-lg text-sm font-medium transition-colors"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
             Thoát (ESC)
           </button>
 
@@ -836,11 +944,10 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
           <button
             onClick={prevSlide}
             disabled={presentationIndex === 0}
-            className={`p-2 rounded-lg transition-colors ${
-              presentationIndex === 0 ? 'text-white/20 cursor-not-allowed' : 'text-white/80 hover:bg-white/10 hover:text-white cursor-pointer'
-            }`}
+            className={`p-2 rounded-lg transition-colors ${presentationIndex === 0 ? 'text-white/20 cursor-not-allowed' : 'text-white/80 hover:bg-white/10 hover:text-white cursor-pointer'
+              }`}
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
           </button>
 
           <div className="min-w-[120px] text-center font-mono text-sm tracking-widest text-white/90 bg-white/5 px-4 py-1.5 rounded-lg border border-white/5">
@@ -850,11 +957,10 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
           <button
             onClick={nextSlide}
             disabled={presentationIndex === presentationNodes.length - 1}
-            className={`p-2 rounded-lg transition-colors ${
-              presentationIndex === presentationNodes.length - 1 ? 'text-white/20 cursor-not-allowed' : 'text-white/80 hover:bg-white/10 hover:text-white cursor-pointer'
-            }`}
+            className={`p-2 rounded-lg transition-colors ${presentationIndex === presentationNodes.length - 1 ? 'text-white/20 cursor-not-allowed' : 'text-white/80 hover:bg-white/10 hover:text-white cursor-pointer'
+              }`}
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
           </button>
         </div>
       )}
@@ -865,17 +971,17 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
           <div className="w-[90%] max-w-2xl bg-[#0f1115]/95 border border-white/10 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 animate-in zoom-in-95 duration-300">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1"/><path d="M18 8h4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-1"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1" /><path d="M18 8h4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-1" /></svg>
                 Trích xuất JSON của Sơ đồ
               </h2>
-              <button 
+              <button
                 onClick={() => setIsExportJsonOpen(false)}
                 className="text-white/50 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-colors cursor-pointer"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
               </button>
             </div>
-            
+
             <p className="text-xs text-white/60">
               Dưới đây là cấu trúc dữ liệu JSON của sơ đồ hiện tại. Bạn có thể sao chép hoặc tải về tệp tin để chia sẻ hoặc lưu trữ.
             </p>
@@ -893,27 +999,26 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
                 onClick={handleDownloadJson}
                 className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-white text-sm font-semibold rounded-xl border border-white/10 transition-all cursor-pointer active:scale-95"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
                 Tải file .json
               </button>
-              
+
               <div className="flex gap-2">
                 <button
                   onClick={handleCopyJson}
-                  className={`flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer active:scale-95 ${
-                    copied 
-                      ? 'bg-green-600 text-white' 
-                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/20'
-                  }`}
+                  className={`flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-xl transition-all cursor-pointer active:scale-95 ${copied
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/20'
+                    }`}
                 >
                   {copied ? (
                     <>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
                       Đã sao chép!
                     </>
                   ) : (
                     <>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
                       Sao chép JSON
                     </>
                   )}
@@ -936,17 +1041,17 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
           <div className="w-[90%] max-w-2xl bg-[#0f1115]/95 border border-white/10 p-6 rounded-2xl shadow-2xl flex flex-col gap-4 animate-in zoom-in-95 duration-300">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
                 Nhập Sơ đồ từ JSON
               </h2>
-              <button 
+              <button
                 onClick={() => setIsImportJsonOpen(false)}
                 className="text-white/50 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-colors cursor-pointer"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
               </button>
             </div>
-            
+
             <p className="text-xs text-white/60">
               Dán đoạn mã JSON của sơ đồ vào khung bên dưới, hoặc bấm chọn tệp tin JSON từ máy tính của bạn.
             </p>
@@ -959,20 +1064,19 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
               </div>
               <button
                 onClick={handleCopyPrompt}
-                className={`shrink-0 flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer active:scale-95 border ${
-                  promptCopied
-                    ? 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]'
-                    : 'bg-blue-600/20 border-blue-500/30 text-blue-400 hover:bg-blue-600/30 hover:text-blue-300 hover:border-blue-400'
-                }`}
+                className={`shrink-0 flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer active:scale-95 border ${promptCopied
+                  ? 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.4)]'
+                  : 'bg-blue-600/20 border-blue-500/30 text-blue-400 hover:bg-blue-600/30 hover:text-blue-300 hover:border-blue-400'
+                  }`}
               >
                 {promptCopied ? (
                   <>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
                     Đã sao chép!
                   </>
                 ) : (
                   <>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
                     Sao chép Prompt AI
                   </>
                 )}
@@ -1002,7 +1106,7 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
             {/* Validation Message */}
             {validationError ? (
               <div className="flex gap-2 items-start bg-red-500/10 border border-red-500/20 px-4 py-2.5 rounded-xl text-xs text-red-400">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="shrink-0 mt-0.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="shrink-0 mt-0.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
                 <div>
                   <span className="font-bold">Lỗi định dạng: </span>
                   {validationError}
@@ -1010,7 +1114,7 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
               </div>
             ) : importText.trim() ? (
               <div className="flex gap-2 items-center bg-green-500/10 border border-green-500/20 px-4 py-2.5 rounded-xl text-xs text-green-400">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
                 <span>Dữ liệu JSON hợp lệ và sẵn sàng render.</span>
               </div>
             ) : null}
@@ -1025,13 +1129,12 @@ Hãy tạo một sơ đồ tư duy có cấu trúc chiều sâu cực kỳ chi t
               <button
                 onClick={handleApplyImport}
                 disabled={!importText.trim() || !!validationError}
-                className={`flex items-center gap-2 px-6 py-2 text-white text-sm font-semibold rounded-xl transition-all cursor-pointer active:scale-95 ${
-                  !importText.trim() || !!validationError
-                    ? 'bg-blue-900/40 text-white/40 cursor-not-allowed border border-white/5'
-                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-lg shadow-blue-500/20'
-                }`}
+                className={`flex items-center gap-2 px-6 py-2 text-white text-sm font-semibold rounded-xl transition-all cursor-pointer active:scale-95 ${!importText.trim() || !!validationError
+                  ? 'bg-blue-900/40 text-white/40 cursor-not-allowed border border-white/5'
+                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-lg shadow-blue-500/20'
+                  }`}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12" /></svg>
                 Áp dụng sơ đồ
               </button>
             </div>

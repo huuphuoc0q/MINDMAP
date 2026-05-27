@@ -36,6 +36,7 @@ interface MindMapStore {
   connections: ConnectionData[];
   transform: CanvasTransform;
   selectedNodeId: string | null;
+  selectedNodeIds: string[];
   selectedConnectionId: string | null;
   editNodeId: string | null;
   history: HistoryState[];
@@ -45,6 +46,7 @@ interface MindMapStore {
   loadMap: (mapId: string) => void;
   setTransform: (transform: CanvasTransform | ((t: CanvasTransform) => CanvasTransform)) => void;
   setSelectedNodeId: (id: string | null) => void;
+  setSelectedNodeIds: (ids: string[]) => void;
   setSelectedConnectionId: (id: string | null) => void;
   setEditNodeId: (id: string | null) => void;
 
@@ -76,6 +78,11 @@ interface MindMapStore {
   nextSlide: () => void;
   prevSlide: () => void;
   importMapData: (nodes: MindNodeData[], connections: ConnectionData[]) => void;
+  
+  // Outliner Mode
+  isOutlinerOpen: boolean;
+  toggleOutliner: () => void;
+  outlinerSync: (nodes: MindNodeData[], connections: ConnectionData[]) => void;
 }
 
 // Deep copy helper to avoid reference sharing
@@ -135,6 +142,7 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
     connections: [],
     transform: { x: 0, y: 0, scale: 1 },
     selectedNodeId: null,
+    selectedNodeIds: [],
     selectedConnectionId: null,
     editNodeId: null,
     history: [],
@@ -144,6 +152,18 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
     isPresenting: false,
     presentationIndex: 0,
     presentationNodes: [],
+
+    // Outliner State
+    isOutlinerOpen: false,
+    toggleOutliner: () => set((state) => ({ isOutlinerOpen: !state.isOutlinerOpen })),
+    outlinerSync: (nodes, connections) => {
+      get().saveSnapshot();
+      set({ nodes, connections });
+      persistToLocalStorage(get().mapId, nodes, connections);
+      
+      // We also need to trigger autoLayout, but autoLayout needs nodeDims.
+      // So the component should call autoLayout after outlinerSync if needed.
+    },
 
     // General Actions
     loadMap: (mapId) => {
@@ -196,6 +216,7 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
         nodes,
         connections,
         selectedNodeId: null,
+        selectedNodeIds: [],
         selectedConnectionId: null,
         editNodeId: null,
         history: [],
@@ -209,8 +230,9 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
       }));
     },
 
-    setSelectedNodeId: (id) => set({ selectedNodeId: id, selectedConnectionId: null }),
-    setSelectedConnectionId: (id) => set({ selectedConnectionId: id, selectedNodeId: null }),
+    setSelectedNodeId: (id) => set({ selectedNodeIds: id ? [id] : [], selectedNodeId: id, selectedConnectionId: null }),
+    setSelectedNodeIds: (ids) => set({ selectedNodeIds: ids, selectedNodeId: ids.length > 0 ? ids[ids.length - 1] : null, selectedConnectionId: null }),
+    setSelectedConnectionId: (id) => set({ selectedConnectionId: id, selectedNodeIds: [], selectedNodeId: null }),
     setEditNodeId: (id) => set({ editNodeId: id }),
 
     // Node Mutations
@@ -224,6 +246,7 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
     },
 
     updateNodeContent: (id, content) => {
+      get().saveSnapshot();
       set((state) => {
         const newNodes = state.nodes.map((n) => (n.id === id ? { ...n, content } : n));
         persistToLocalStorage(state.mapId, newNodes, state.connections);
@@ -259,8 +282,8 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
     },
 
     deleteSelected: () => {
-      const { selectedNodeId, selectedConnectionId, nodes, connections } = get();
-      if (!selectedNodeId && !selectedConnectionId) return;
+      const { selectedNodeIds, selectedConnectionId } = get();
+      if (selectedNodeIds.length === 0 && !selectedConnectionId) return;
 
       get().saveSnapshot();
 
@@ -268,10 +291,11 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
         let newNodes = state.nodes;
         let newConnections = state.connections;
 
-        if (state.selectedNodeId) {
-          newNodes = state.nodes.filter((n) => n.id !== state.selectedNodeId);
+        if (state.selectedNodeIds.length > 0) {
+          const selectedSet = new Set(state.selectedNodeIds);
+          newNodes = state.nodes.filter((n) => !selectedSet.has(n.id));
           newConnections = state.connections.filter(
-            (c) => c.source !== state.selectedNodeId && c.target !== state.selectedNodeId
+            (c) => !selectedSet.has(c.source) && !selectedSet.has(c.target)
           );
         } else if (state.selectedConnectionId) {
           newConnections = state.connections.filter((c) => c.id !== state.selectedConnectionId);
@@ -282,6 +306,7 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
           nodes: newNodes,
           connections: newConnections,
           selectedNodeId: null,
+          selectedNodeIds: [],
           selectedConnectionId: null,
         };
       });
@@ -327,6 +352,7 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
         history: newHistory,
         future: [...future, currentSnapshot],
         selectedNodeId: null,
+        selectedNodeIds: [],
         selectedConnectionId: null,
       });
 
@@ -347,6 +373,7 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
         history: [...history, currentSnapshot],
         future: newFuture,
         selectedNodeId: null,
+        selectedNodeIds: [],
         selectedConnectionId: null,
       });
 
@@ -530,6 +557,7 @@ export const useMindMapStore = create<MindMapStore>((set, get) => {
         nodes,
         connections,
         selectedNodeId: null,
+        selectedNodeIds: [],
         selectedConnectionId: null,
         editNodeId: null,
       });

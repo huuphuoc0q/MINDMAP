@@ -23,17 +23,17 @@ const splitElementAt = (element: HTMLElement, container: Node, offset: number): 
     const textNode = container as Text;
     splitNode = textNode.splitText(offset);
   }
-  
+
   const rightElement = element.cloneNode(false) as HTMLElement;
   element.parentNode?.insertBefore(rightElement, element.nextSibling);
-  
+
   let curr: Node | null = splitNode;
   while (curr) {
     const next: Node | null = curr.nextSibling;
     rightElement.appendChild(curr);
     curr = next;
   }
-  
+
   return rightElement;
 };
 
@@ -61,17 +61,17 @@ const setSelectionCharacterOffset = (element: HTMLElement, start: number, end: n
   const win = doc.defaultView || window;
   const sel = win.getSelection();
   if (!sel) return;
-  
+
   let charIndex = 0;
   const range = doc.createRange();
   range.setStart(element, 0);
   range.collapse(true);
-  
+
   const nodeStack: Node[] = [element];
   let node: Node | undefined;
   let foundStart = false;
   let foundEnd = false;
-  
+
   while ((node = nodeStack.pop()) && !(foundStart && foundEnd)) {
     if (node.nodeType === Node.TEXT_NODE) {
       const nextCharIndex = charIndex + node.textContent!.length;
@@ -91,14 +91,14 @@ const setSelectionCharacterOffset = (element: HTMLElement, start: number, end: n
       }
     }
   }
-  
+
   sel.removeAllRanges();
   sel.addRange(range);
 };
 
 export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
   node,
-  level, 
+  level,
   hasChildren,      // <--- Kéo biến vào
   isCollapsed,
   isEditing,
@@ -107,19 +107,19 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
   onDoubleClick,
   onChange,
   onConnectionStart,
-  onResizeStart, 
+  onResizeStart,
   onToggleCollapse,// <--- THÊM VÀO ĐÂY
 }, ref) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const isEditingRef = useRef(isEditing);
   const BORDER_COLORS = [
-      'border-blue-500/60',   // Root: Xanh dương
-      'border-emerald-500/50',// Tầng 1: Xanh ngọc
-      'border-purple-500/50', // Tầng 2: Tím
-      'border-orange-500/50', // Tầng 3: Cam
-      'border-pink-500/50',   // Tầng 4: Hồng
-    ];
-  
+    'border-blue-500/60',   // Root: Xanh dương
+    'border-emerald-500/50',// Tầng 1: Xanh ngọc
+    'border-purple-500/50', // Tầng 2: Tím
+    'border-orange-500/50', // Tầng 3: Cam
+    'border-pink-500/50',   // Tầng 4: Hồng
+  ];
+
   // Lấy màu tương ứng (nếu sâu hơn 4 tầng thì lặp lại màu)
   const nodeThemeClass = BORDER_COLORS[level % BORDER_COLORS.length];
   // Sync Content when changing between editing and read-only modes
@@ -131,21 +131,21 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
         const selection = window.getSelection();
         const range = document.createRange();
         if (contentRef.current.childNodes.length > 0) {
-            range.selectNodeContents(contentRef.current);
-            range.collapse(false);
-            selection?.removeAllRanges();
-            selection?.addRange(range);
+          range.selectNodeContents(contentRef.current);
+          range.collapse(false);
+          selection?.removeAllRanges();
+          selection?.addRange(range);
         }
       }
     }
-    
+
     // Transitioning out of edit mode -> Save the new HTML back to Canvas state
     if (isEditingRef.current && !isEditing) {
       if (contentRef.current && contentRef.current.innerHTML !== node.content) {
         onChange(node.id, contentRef.current.innerHTML);
       }
     }
-    
+
     isEditingRef.current = isEditing;
   }, [isEditing, node.content, onChange, node.id]);
 
@@ -186,10 +186,10 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
         if (range.collapsed) {
           // Trường hợp A: Con trỏ nhấp nháy. Chia đôi thẻ span và chèn ZWSP ở giữa
           const rightSpan = splitElementAt(highlightSpan, range.startContainer, range.startOffset);
-          
+
           const normalText = document.createTextNode('\u200B');
           parent.insertBefore(normalText, rightSpan);
-          
+
           // Xóa các thẻ rỗng nếu có
           if (highlightSpan.textContent === '' || highlightSpan.textContent === '\u200B') {
             parent.removeChild(highlightSpan);
@@ -214,10 +214,10 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
 
           // Bước 1: Tách phần sau vùng chọn ra trước (chia tại endContainer, endOffset)
           const rightSpan = splitElementAt(highlightSpan, range.endContainer, range.endOffset);
-          
+
           // Bước 2: Tách phần vùng chọn ra khỏi phần trước (chia tại startContainer, startOffset)
           const midSpan = splitElementAt(highlightSpan, range.startContainer, range.startOffset);
-          
+
           if (midSpan) {
             // Unwrap midSpan (phần được bôi đen cần bỏ highlight)
             const frag = document.createDocumentFragment();
@@ -226,7 +226,7 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
             }
             parent.replaceChild(frag, midSpan);
           }
-          
+
           // Xóa các thẻ rỗng nếu có
           if (highlightSpan.textContent === '' || highlightSpan.textContent === '\u200B') {
             parent.removeChild(highlightSpan);
@@ -258,11 +258,10 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
         const span = document.createElement('span');
         span.className = 'editor-highlight';
         span.style.color = '#F59E0B';
-        span.style.fontWeight = 'bold';
         span.innerHTML = '&#8203;'; // zero-width space
-        
+
         range.insertNode(span);
-        
+
         // Di chuyển con trỏ vào bên trong thẻ span mới tạo
         const newRange = document.createRange();
         newRange.setStart(span.firstChild!, 1);
@@ -274,8 +273,7 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
         const span = document.createElement('span');
         span.className = 'editor-highlight';
         span.style.color = '#F59E0B';
-        span.style.fontWeight = 'bold';
-        
+
         try {
           range.surroundContents(span);
         } catch (e) {
@@ -314,7 +312,7 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
   const handlePointerDown = (e: React.PointerEvent) => {
     // Chặn sự kiện truyền tải ra Canvas (để chặn hành vi Pan không mong muốn khi click Node)
     e.stopPropagation();
-    
+
     // Nếu ĐANG ở trạng thái chỉnh sửa, KHÔNG gọi onPointerDown của node
     // để Trình duyệt có không gian ưu tiên xử lý việc Bôi đen văn bản (Text Selection)
     if (!isEditing) {
@@ -323,13 +321,13 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onDoubleClick(node.id, e);
+    e.stopPropagation();
+    onDoubleClick(node.id, e);
   };
 
   const handleConnectionStart = (e: React.PointerEvent) => {
-      e.stopPropagation();
-      onConnectionStart(node.id, e);
+    e.stopPropagation();
+    onConnectionStart(node.id, e);
   };
 
   return (
@@ -337,8 +335,8 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
       ref={ref}
       data-node-id={node.id}
       className={`absolute bg-[#12141A]/95 backdrop-blur-md rounded-2xl transition-[box-shadow,transform,background-color,border-color,outline] duration-300 group
-        ${isEditing ? 'node-editing ring-2 ring-blue-500/60 z-20 cursor-text' : `node-shadow border-[1.5px] ${nodeThemeClass} z-10 cursor-grab hover:-translate-y-1 hover:shadow-[0_20px_40px_rgba(0,0,0,0.6)]`}
-        ${isSelected && !isEditing ? 'ring-2 ring-white/40 ring-offset-2 ring-offset-[#09090b]' : ''}
+        ${isEditing ? 'node-editing z-20 cursor-text' : `node-shadow border-[1.5px] ${nodeThemeClass} z-10 cursor-grab hover:-translate-y-1 hover:shadow-[0_20px_40px_rgba(0,0,0,0.6)]`}
+        ${isSelected && !isEditing ? 'node-selected z-20' : ''}
       `}
       style={{
         left: node.x,
@@ -356,23 +354,23 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
         <div className="absolute top-2 left-4 flex items-center gap-1.5 select-none pointer-events-none">
           {/* Chấm tròn nhỏ đổi màu theo tầng để tăng độ nhận diện */}
           <div className={`w-1.5 h-1.5 rounded-full ${nodeThemeClass.replace('border-', 'bg-').replace('/60', '').replace('/50', '')}`} />
-          
+
           {/* Nhãn phân cấp */}
           <span className="text-[9px] font-bold text-white/50 tracking-widest uppercase">
             {level === 0 ? "Chủ đề chính" : `Nhánh cấp ${level}`}
           </span>
         </div>
       )}
-      
+
       {/* (Giữ nguyên phần EDITING MODE bên dưới) */}
       {isEditing && (
         <div className="absolute top-2 left-4 right-4 text-[10px] font-mono text-blue-400 flex justify-between select-none pointer-events-none">
           <span>EDITING MODE</span>
         </div>
       )}
-{/* --- THÊM KHỐI NÚT TOGGLE COLLAPSE --- */}
+      {/* --- THÊM KHỐI NÚT TOGGLE COLLAPSE --- */}
       {hasChildren && !isEditing && (
-        <div 
+        <div
           // ĐÃ SỬA: Đổi vị trí từ right-[-24px] top-1/2 thành -top-3 -right-3 (Góc trên cùng bên phải)
           className={`absolute -top-3 -right-3 w-5 h-5 flex items-center justify-center rounded-full border-2 cursor-pointer transition-all z-40 hover:scale-125
             ${isCollapsed ? 'bg-blue-500 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.8)]' : 'bg-[#25282E] border-white/20 text-white/60 hover:text-white'}
@@ -385,15 +383,15 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
         >
           {/* Dùng SVG vẽ dấu + và - cho sắc nét */}
           {isCollapsed ? (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
           ) : (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12h14"/></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><path d="M5 12h14" /></svg>
           )}
         </div>
       )}
       {/* Output Node Connection Handle */}
       {!isEditing && (
-        <div 
+        <div
           className="absolute right-[-6px] top-1/2 -translate-y-1/2 w-3 h-3 bg-[#1A1C21] border-2 border-green-500 rounded-full cursor-crosshair hover:scale-150 hover:bg-green-500 transition-all z-30 touch-none"
           onPointerDown={handleConnectionStart}
           title="Drag to connect"
@@ -424,15 +422,15 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
         }}
         onPaste={(e) => {
           e.preventDefault(); // Chặn hành vi dán nguyên bản (kèm HTML/CSS) của trình duyệt
-          
+
           // Trích xuất văn bản thuần (plain text) từ bộ nhớ tạm
           const text = e.clipboardData.getData('text/plain');
-          
+
           // Chèn văn bản thuần vào vị trí con trỏ hiện tại
           document.execCommand('insertText', false, text);
         }}
       />
-      
+
       {!isEditing && (
         <div
           className="absolute right-0 bottom-0 w-5 h-5 cursor-nwse-resize flex items-end justify-end p-1 rounded-br-xl z-30 opacity-0 group-hover:opacity-100 transition-opacity"

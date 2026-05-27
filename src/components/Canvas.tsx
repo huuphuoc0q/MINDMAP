@@ -18,11 +18,13 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
     connections,
     transform,
     selectedNodeId,
+    selectedNodeIds,
     selectedConnectionId,
     editNodeId,
     loadMap,
     setTransform,
     setSelectedNodeId,
+    setSelectedNodeIds,
     setSelectedConnectionId,
     setEditNodeId,
     addNode,
@@ -52,9 +54,9 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
       // 1. Do not trigger shortcuts when typing inside a node
       const currentEditNodeId = useMindMapStore.getState().editNodeId;
       if (currentEditNodeId) return;
-      
+
       const state = useMindMapStore.getState();
-      
+
       // 2. Presentation Mode Shortcuts
       if (state.isPresenting) {
         if (e.key === 'ArrowRight' || e.key === ' ') {
@@ -100,10 +102,37 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const tempLineRef = useRef<SVGPathElement | null>(null);
 
+  // Lasso Selection Box State & Refs
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; currentX: number; currentY: number } | null>(null);
+  const selectionBoxActiveRef = useRef(false);
+  const selectionBoxRef = useRef<{ 
+    startX: number; 
+    startY: number; 
+    currentX: number; 
+    currentY: number;
+    cachedVisibleNodes?: Array<{ id: string; x: number; y: number; width: number; height: number }>;
+  } | null>(null);
+
   // Dragging/Resizing State Refs
   const isPanningRef = useRef(false);
   const lastPanPointRef = useRef<{ x: number; y: number } | null>(null);
-  const draggedNodeRef = useRef<{ id: string; offsetX: number; offsetY: number; width: number; height: number } | null>(null);
+  const draggedNodesRef = useRef<{
+    triggerNodeId: string;
+    pointerStartX: number;
+    pointerStartY: number;
+    nodes: Array<{ id: string; startX: number; startY: number; width: number; height: number }>;
+    relevantConnections?: Array<{
+      id: string;
+      source: string;
+      target: string;
+      sourceIsDragged: boolean;
+      targetIsDragged: boolean;
+      staticSourceX?: number;
+      staticSourceY?: number;
+      staticTargetX?: number;
+      staticTargetY?: number;
+    }>;
+  } | null>(null);
   const connectingRef = useRef<{ sourceNodeId: string; startX: number; startY: number } | null>(null);
   const resizingNodeRef = useRef<{ id: string; startWidth: number; startHeight: number; startX: number; startY: number } | null>(null);
 
@@ -156,14 +185,72 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return; // Only process left click
 
-    isPanningRef.current = true;
-    lastPanPointRef.current = { x: e.clientX, y: e.clientY };
-    setSelectedNodeId(null);
-    setEditNodeId(null);
+    // Check if Shift or Ctrl is pressed to activate Lasso Selection
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      isPanningRef.current = false;
+      selectionBoxActiveRef.current = true;
+      
+      // Perform DFS ONCE to find visible nodes when lasso starts
+      const activeNodes = useMindMapStore.getState().nodes;
+      const activeConns = useMindMapStore.getState().connections;
+      const targetIds = new Set(activeConns.map((c) => c.target));
+      const roots = activeNodes.filter((n) => !targetIds.has(n.id));
+
+      const adjList: Record<string, string[]> = {};
+      activeConns.forEach((c) => {
+        if (!adjList[c.source]) adjList[c.source] = [];
+        adjList[c.source].push(c.target);
+      });
+
+      const visibleNodes = new Set<string>();
+      const visited = new Set<string>();
+
+      const dfs = (nodeId: string, isVisible: boolean) => {
+        if (visited.has(nodeId)) return;
+        visited.add(nodeId);
+        if (isVisible) visibleNodes.add(nodeId);
+
+        const children = adjList[nodeId] || [];
+        const node = activeNodes.find((n) => n.id === nodeId);
+        const childrenVisible = isVisible && !node?.isCollapsed;
+
+        children.forEach((childId) => {
+          dfs(childId, childrenVisible);
+        });
+      };
+
+      roots.forEach((r) => dfs(r.id, true));
+      activeNodes.forEach((n) => {
+        if (!visited.has(n.id)) dfs(n.id, true);
+      });
+
+      const cachedVisibleNodes = activeNodes
+        .filter(n => visibleNodes.has(n.id))
+        .map(n => ({ id: n.id, x: n.x, y: n.y, width: n.width, height: n.height }));
+
+      const box = { 
+        startX: e.clientX, 
+        startY: e.clientY, 
+        currentX: e.clientX, 
+        currentY: e.clientY,
+        cachedVisibleNodes 
+      };
+      
+      selectionBoxRef.current = box;
+      setSelectionBox({ startX: box.startX, startY: box.startY, currentX: box.currentX, currentY: box.currentY });
+      setSelectedConnectionId(null);
+    } else {
+      isPanningRef.current = true;
+      selectionBoxActiveRef.current = false;
+      lastPanPointRef.current = { x: e.clientX, y: e.clientY };
+      setSelectedNodeIds([]);
+      setSelectedConnectionId(null);
+      setEditNodeId(null);
+    }
 
     try {
       containerRef.current?.setPointerCapture(e.pointerId);
-    } catch {}
+    } catch { }
   };
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
@@ -176,53 +263,109 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
       return;
     }
 
-    // 2. High-performance Node Dragging (60fps)
-    if (draggedNodeRef.current) {
-      const { id, offsetX, offsetY, width, height } = draggedNodeRef.current;
+    // 2. Lasso Selection Box Calculations
+    if (selectionBoxActiveRef.current && containerRef.current && selectionBoxRef.current) {
+      selectionBoxRef.current.currentX = e.clientX;
+      selectionBoxRef.current.currentY = e.clientY;
+
+      // Update state for rendering Lasso box visual overlay
+      setSelectionBox({ 
+        startX: selectionBoxRef.current.startX,
+        startY: selectionBoxRef.current.startY,
+        currentX: selectionBoxRef.current.currentX,
+        currentY: selectionBoxRef.current.currentY
+      });
+
+      const xMin = Math.min(selectionBoxRef.current.startX, selectionBoxRef.current.currentX);
+      const xMax = Math.max(selectionBoxRef.current.startX, selectionBoxRef.current.currentX);
+      const yMin = Math.min(selectionBoxRef.current.startY, selectionBoxRef.current.currentY);
+      const yMax = Math.max(selectionBoxRef.current.startY, selectionBoxRef.current.currentY);
+
+      const containerRect = containerRef.current.getBoundingClientRect();
       const t = useMindMapStore.getState().transform;
-      const mappedX = (e.clientX - t.x) / t.scale - offsetX;
-      const mappedY = (e.clientY - t.y) / t.scale - offsetY;
 
-      const nodeEl = nodeRefs.current[id];
-      if (nodeEl) {
-        nodeEl.style.left = `${mappedX}px`;
-        nodeEl.style.top = `${mappedY}px`;
+      const canvasXMin = (xMin - containerRect.left - t.x) / t.scale;
+      const canvasXMax = (xMax - containerRect.left - t.x) / t.scale;
+      const canvasYMin = (yMin - containerRect.top - t.y) / t.scale;
+      const canvasYMax = (yMax - containerRect.top - t.y) / t.scale;
 
-        const activeConns = useMindMapStore.getState().connections;
-        const activeNodes = useMindMapStore.getState().nodes;
+      const activeNodeIds: string[] = [];
+      const cachedNodes = selectionBoxRef.current.cachedVisibleNodes || [];
+      
+      for (const node of cachedNodes) {
+        const intersects =
+          node.x < canvasXMax &&
+          node.x + node.width > canvasXMin &&
+          node.y < canvasYMax &&
+          node.y + node.height > canvasYMin;
 
-        activeConns.forEach((conn) => {
-          if (conn.source !== id && conn.target !== id) return;
+        if (intersects) {
+          activeNodeIds.push(node.id);
+        }
+      }
+
+      useMindMapStore.getState().setSelectedNodeIds(activeNodeIds);
+      return;
+    }
+
+    // 3. High-performance MULTIPLE Node Dragging (60fps)
+    if (draggedNodesRef.current) {
+      const { pointerStartX, pointerStartY, nodes: dNodes, relevantConnections } = draggedNodesRef.current;
+      const t = useMindMapStore.getState().transform;
+      const dx = (e.clientX - pointerStartX) / t.scale;
+      const dy = (e.clientY - pointerStartY) / t.scale;
+
+      const dNodesMap = new Map<string, { id: string; startX: number; startY: number; width: number; height: number }>(dNodes.map(dn => [dn.id, dn]));
+
+      dNodes.forEach((dn) => {
+        const finalX = dn.startX + dx;
+        const finalY = dn.startY + dy;
+
+        const nodeEl = nodeRefs.current[dn.id];
+        if (nodeEl) {
+          nodeEl.style.left = `${finalX}px`;
+          nodeEl.style.top = `${finalY}px`;
+        }
+      });
+
+      if (relevantConnections) {
+        relevantConnections.forEach((conn) => {
           const pathEl = connRefs.current[conn.id];
           if (!pathEl) return;
 
           let x1, y1, x2, y2;
 
-          if (conn.source === id) {
-            x1 = mappedX + width;
-            y1 = mappedY + height / 2;
+          if (conn.sourceIsDragged) {
+            const dn = dNodesMap.get(conn.source);
+            if (dn) {
+              x1 = dn.startX + dx + dn.width;
+              y1 = dn.startY + dy + dn.height / 2;
+            }
           } else {
-            const srcNode = activeNodes.find((n) => n.id === conn.source);
-            x1 = srcNode ? srcNode.x + srcNode.width : 0;
-            y1 = srcNode ? srcNode.y + srcNode.height / 2 : 0;
+            x1 = conn.staticSourceX;
+            y1 = conn.staticSourceY;
           }
 
-          if (conn.target === id) {
-            x2 = mappedX - 6; // Offset target end point by 6px for sleek arrowheads
-            y2 = mappedY + height / 2;
+          if (conn.targetIsDragged) {
+            const dn = dNodesMap.get(conn.target);
+            if (dn) {
+              x2 = dn.startX + dx - 6; // Offset target end point by 6px
+              y2 = dn.startY + dy + dn.height / 2;
+            }
           } else {
-            const tgtNode = activeNodes.find((n) => n.id === conn.target);
-            x2 = tgtNode ? tgtNode.x - 6 : 0;
-            y2 = tgtNode ? tgtNode.y + tgtNode.height / 2 : 0;
+            x2 = conn.staticTargetX;
+            y2 = conn.staticTargetY;
           }
 
-          pathEl.setAttribute('d', getPath(x1, y1, x2, y2));
+          if (x1 !== undefined && y1 !== undefined && x2 !== undefined && y2 !== undefined) {
+            pathEl.setAttribute('d', getPath(x1, y1, x2, y2));
+          }
         });
       }
       return;
     }
 
-    // 3. High-performance Resizing (60fps)
+    // 4. High-performance Resizing (60fps)
     if (resizingNodeRef.current) {
       const { id, startWidth, startHeight, startX, startY } = resizingNodeRef.current;
       const t = useMindMapStore.getState().transform;
@@ -275,7 +418,7 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
       return;
     }
 
-    // 4. Dynamic Dotted Connection Drawing
+    // 5. Dynamic Dotted Connection Drawing
     if (connectingRef.current && tempLineRef.current) {
       const { startX, startY } = connectingRef.current;
       const t = useMindMapStore.getState().transform;
@@ -289,18 +432,29 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
     isPanningRef.current = false;
     lastPanPointRef.current = null;
 
-    // Sync dragged node position to Zustand
-    if (draggedNodeRef.current) {
-      const { id } = draggedNodeRef.current;
-      const nodeEl = nodeRefs.current[id];
-      if (nodeEl) {
-        const finalX = parseFloat(nodeEl.style.left);
-        const finalY = parseFloat(nodeEl.style.top);
+    // Reset Lasso Selection Box
+    if (selectionBoxActiveRef.current) {
+      selectionBoxActiveRef.current = false;
+      selectionBoxRef.current = null;
+      setSelectionBox(null);
+    }
 
-        useMindMapStore.getState().saveSnapshot();
-        useMindMapStore.getState().updateNodePosition(id, finalX, finalY);
-      }
-      draggedNodeRef.current = null;
+    // Sync dragged multiple nodes position to Zustand
+    if (draggedNodesRef.current) {
+      const { pointerStartX, pointerStartY, nodes: dNodes } = draggedNodesRef.current;
+      const t = useMindMapStore.getState().transform;
+      const dx = (e.clientX - pointerStartX) / t.scale;
+      const dy = (e.clientY - pointerStartY) / t.scale;
+
+      useMindMapStore.getState().saveSnapshot();
+
+      dNodes.forEach((dn) => {
+        const finalX = dn.startX + dx;
+        const finalY = dn.startY + dy;
+        useMindMapStore.getState().updateNodePosition(dn.id, finalX, finalY);
+      });
+
+      draggedNodesRef.current = null;
     }
 
     // Sync resized node dimensions to Zustand
@@ -340,7 +494,7 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
 
     try {
       containerRef.current?.releasePointerCapture(e.pointerId);
-    } catch {}
+    } catch { }
   }, [addConnection]);
 
   // Native mousewheel handling for smooth custom zooming
@@ -375,35 +529,100 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
   // Node Callbacks
   const handleNodePointerDown = useCallback((nodeId: string, e: React.PointerEvent) => {
     e.stopPropagation();
-    setSelectedNodeId(nodeId);
 
     const currentEditId = useMindMapStore.getState().editNodeId;
     if (currentEditId === nodeId) return;
 
+    const selectedNodeIds = useMindMapStore.getState().selectedNodeIds;
+    let newSelectedIds = [...selectedNodeIds];
+
+    // Check if Shift or Ctrl is held to toggle multi-selection
+    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+      if (newSelectedIds.includes(nodeId)) {
+        newSelectedIds = newSelectedIds.filter(id => id !== nodeId);
+      } else {
+        newSelectedIds.push(nodeId);
+      }
+      setSelectedNodeIds(newSelectedIds);
+      // When selecting with modifier key, we do NOT initiate drag to avoid accidental movement
+      return;
+    } else {
+      // If the node is not already selected, select it as the sole active node
+      if (!selectedNodeIds.includes(nodeId)) {
+        setSelectedNodeIds([nodeId]);
+        newSelectedIds = [nodeId];
+      }
+    }
+
     const activeNodes = useMindMapStore.getState().nodes;
-    const node = activeNodes.find((n) => n.id === nodeId);
-    if (!node) return;
 
-    const nodeEl = nodeRefs.current[nodeId];
-    const actualWidth = nodeEl ? nodeEl.offsetWidth : node.width;
-    const actualHeight = nodeEl ? nodeEl.offsetHeight : node.height;
+    // Gather positions and dimensions of all currently selected nodes for high-performance multi-dragging
+    const dragNodes = newSelectedIds.map((id) => {
+      const n = activeNodes.find((node) => node.id === id);
+      const el = nodeRefs.current[id];
+      return {
+        id,
+        startX: n ? n.x : 0,
+        startY: n ? n.y : 0,
+        width: el ? el.offsetWidth : (n ? n.width : 250),
+        height: el ? el.offsetHeight : (n ? n.height : 100),
+      };
+    });
 
-    const t = useMindMapStore.getState().transform;
-    const offsetX = (e.clientX - t.x) / t.scale - node.x;
-    const offsetY = (e.clientY - t.y) / t.scale - node.y;
+    // Cache related connections
+    const activeConns = useMindMapStore.getState().connections;
+    const draggedNodesSet = new Set(newSelectedIds);
+    
+    const relevantConnections = activeConns
+      .filter(c => draggedNodesSet.has(c.source) || draggedNodesSet.has(c.target))
+      .map(c => {
+        const sourceIsDragged = draggedNodesSet.has(c.source);
+        const targetIsDragged = draggedNodesSet.has(c.target);
+        
+        let staticSourceX, staticSourceY, staticTargetX, staticTargetY;
+        
+        if (!sourceIsDragged) {
+          const n = activeNodes.find(node => node.id === c.source);
+          const el = nodeRefs.current[c.source];
+          const w = el ? el.offsetWidth : (n ? n.width : 250);
+          const h = el ? el.offsetHeight : (n ? n.height : 100);
+          staticSourceX = n ? n.x + w : 0;
+          staticSourceY = n ? n.y + h / 2 : 0;
+        }
+        
+        if (!targetIsDragged) {
+          const n = activeNodes.find(node => node.id === c.target);
+          const el = nodeRefs.current[c.target];
+          const h = el ? el.offsetHeight : (n ? n.height : 100);
+          staticTargetX = n ? n.x - 6 : 0;
+          staticTargetY = n ? n.y + h / 2 : 0;
+        }
+        
+        return {
+          id: c.id,
+          source: c.source,
+          target: c.target,
+          sourceIsDragged,
+          targetIsDragged,
+          staticSourceX,
+          staticSourceY,
+          staticTargetX,
+          staticTargetY
+        };
+      });
 
-    draggedNodeRef.current = {
-      id: nodeId,
-      offsetX,
-      offsetY,
-      width: actualWidth,
-      height: actualHeight,
+    draggedNodesRef.current = {
+      triggerNodeId: nodeId,
+      pointerStartX: e.clientX,
+      pointerStartY: e.clientY,
+      nodes: dragNodes,
+      relevantConnections,
     };
 
     try {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    } catch {}
-  }, [setSelectedNodeId]);
+    } catch { }
+  }, [setSelectedNodeIds]);
 
   const handleNodeDoubleClick = useCallback((nodeId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -431,12 +650,12 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
 
     try {
       containerRef.current?.setPointerCapture(e.pointerId);
-    } catch {}
+    } catch { }
   }, []);
 
   const handleNodeResizeStart = useCallback((nodeId: string, e: React.PointerEvent) => {
     e.stopPropagation();
-    setSelectedNodeId(nodeId);
+    setSelectedNodeIds([nodeId]);
 
     const node = useMindMapStore.getState().nodes.find((n) => n.id === nodeId);
     const nodeEl = nodeRefs.current[nodeId];
@@ -452,8 +671,8 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
 
     try {
       containerRef.current?.setPointerCapture(e.pointerId);
-    } catch {}
-  }, [setSelectedNodeId]);
+    } catch { }
+  }, [setSelectedNodeIds]);
 
   const handleBackgroundDoubleClick = (e: React.MouseEvent) => {
     if (!containerRef.current) return;
@@ -527,6 +746,7 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
   };
 
   const editNode = nodes.find((n) => n.id === editNodeId);
+  const isEmpty = nodes.length === 0;
 
   return (
     <div
@@ -600,7 +820,7 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
               hasChildren={treeData.hasChildren[node.id]}
               isCollapsed={!!node.isCollapsed}
               isEditing={editNodeId === node.id}
-              isSelected={selectedNodeId === node.id}
+              isSelected={selectedNodeIds.includes(node.id)}
               onPointerDown={handleNodePointerDown}
               onDoubleClick={handleNodeDoubleClick}
               onChange={handleNodeChange}
@@ -618,8 +838,87 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
         />
       )}
 
+      {/* Lasso Selection Box visual element */}
+      {selectionBox && containerRef.current && (
+        <div
+          className="selection-box absolute pointer-events-none z-50 rounded"
+          style={{
+            left: Math.min(selectionBox.startX, selectionBox.currentX) - containerRef.current.getBoundingClientRect().left,
+            top: Math.min(selectionBox.startY, selectionBox.currentY) - containerRef.current.getBoundingClientRect().top,
+            width: Math.abs(selectionBox.currentX - selectionBox.startX),
+            height: Math.abs(selectionBox.currentY - selectionBox.startY),
+          }}
+        />
+      )}
+
+      {/* Empty State Overlay */}
+      {isEmpty && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40 animate-fade-in">
+          <div className="glass-panel p-10 rounded-3xl max-w-md w-full mx-4 flex flex-col items-center text-center pointer-events-auto border border-white/10 shadow-[0_30px_60px_rgba(0,0,0,0.8)] backdrop-blur-2xl transition-all hover:border-white/20 hover:shadow-[0_40px_80px_rgba(0,0,0,0.9)]">
+            {/* Glowing Icon */}
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-500/20 via-purple-500/20 to-pink-500/20 border border-white/10 flex items-center justify-center text-blue-400 mb-6 shadow-inner relative animate-pulse">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              </svg>
+              <div className="absolute -inset-1 bg-gradient-to-tr from-blue-500 to-purple-500 rounded-2xl opacity-20 blur-md -z-10" />
+            </div>
+
+            <h3 className="text-xl font-heading font-semibold text-white mb-2 tracking-tight">
+              Không gian Sáng tạo Trống
+            </h3>
+            <p className="text-sm text-white/50 mb-8 leading-relaxed max-w-xs">
+              Bắt đầu phác thảo ý tưởng, vẽ sơ đồ tư duy hoặc nhập dữ liệu để bắt đầu hành trình của bạn.
+            </p>
+
+            {/* CTAs */}
+            <div className="flex flex-col gap-3 w-full">
+              <button
+                onClick={() => {
+                  const viewportWidth = window.innerWidth;
+                  const viewportHeight = window.innerHeight;
+                  const x = (viewportWidth / 2 - transform.x) / transform.scale - 125;
+                  const y = (viewportHeight / 2 - transform.y) / transform.scale - 50;
+
+                  const newNode: MindNodeData = {
+                    id: `n${Date.now()}`,
+                    x,
+                    y,
+                    width: 250,
+                    height: 100,
+                    content: '<b>Ý tưởng trung tâm mới</b><br/>Nhấp đúp để chỉnh sửa...',
+                  };
+                  addNode(newNode);
+                  setEditNodeId(newNode.id);
+                }}
+                className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-semibold rounded-xl transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:shadow-[0_0_25px_rgba(59,130,246,0.6)] active:scale-[0.98] cursor-pointer"
+              >
+                Tạo Ý tưởng Trung tâm
+              </button>
+
+              <button
+                onClick={() => {
+                  loadMap('map_default');
+                }}
+                className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white font-semibold rounded-xl transition-all active:scale-[0.98] cursor-pointer"
+              >
+                Tải Sơ đồ Mẫu
+              </button>
+            </div>
+
+            {/* Tiny guide */}
+            <div className="mt-8 text-[11px] text-white/40 border-t border-white/5 pt-4 w-full flex items-center justify-center gap-1">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-blue-400">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4M12 8h.01" />
+              </svg>
+              <span>Mẹo: Nhấp đúp vào nền để tạo nhanh một khối</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Floating Central Control Bar */}
-      {!isPresenting && (
+      {!isPresenting && !isEmpty && (
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-4 z-50">
           <div className="flex items-center gap-2 p-1.5 glass-panel rounded-2xl" onPointerDown={(e) => e.stopPropagation()}>
             <button
@@ -677,7 +976,7 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
 
           {/* HUD Instructions Panel */}
           <div className="px-4 py-1.5 glass-panel rounded-full text-[10px] text-white/50 tracking-wider pointer-events-none whitespace-nowrap font-medium uppercase shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
-            Dbl-click: <span className="text-white">New/Edit Node</span> &nbsp;&bull;&nbsp; Drag: <span className="text-white">Move/Pan</span> &nbsp;&bull;&nbsp; Del: <span className="text-white">Delete</span> &nbsp;&bull;&nbsp; Ctrl+Z/Y: <span className="text-white">Undo/Redo</span>
+            Dbl-click: <span className="text-white">New/Edit</span> &nbsp;&bull;&nbsp; Drag: <span className="text-white">Pan</span> &nbsp;&bull;&nbsp; Shift+Drag: <span className="text-white">Multi-Select</span> &nbsp;&bull;&nbsp; Del: <span className="text-white">Delete</span> &nbsp;&bull;&nbsp; Ctrl+Z/Y: <span className="text-white">Undo/Redo</span>
           </div>
         </div>
       )}

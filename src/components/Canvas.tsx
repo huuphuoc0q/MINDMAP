@@ -100,12 +100,23 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
             const newNodeHeight = 100;
             const x = parentNode.x + parentNode.width + 120;
             
-            // Alternating vertical offset to avoid overlap
+            // Place the child node below all other existing child nodes to avoid overlap
             let y = parentNode.y + (parentNode.height / 2) - (newNodeHeight / 2);
             if (childCount > 0) {
-              const direction = childCount % 2 === 0 ? 1 : -1;
-              const step = Math.ceil(childCount / 2);
-              y += direction * step * 130;
+              const childrenIds = parentChildren.map(c => c.target);
+              const childrenNodes = state.nodes.filter(n => childrenIds.includes(n.id));
+              if (childrenNodes.length > 0) {
+                let lowestY = -Infinity;
+                childrenNodes.forEach(child => {
+                  const el = nodeRefs.current[child.id];
+                  const h = el ? el.offsetHeight : child.height;
+                  const bottomY = child.y + h;
+                  if (bottomY > lowestY) {
+                    lowestY = bottomY;
+                  }
+                });
+                y = lowestY + 30; // 30px spacing below the lowest node
+              }
             }
             
             state.saveSnapshot();
@@ -126,6 +137,20 @@ export function Canvas({ mapId }: { mapId: string; key?: string }) {
             // Focus and edit the child node immediately
             state.setSelectedNodeIds([childId]);
             state.setEditNodeId(childId);
+
+            // Automatically layout the mindmap to arrange the newly created node beautifully
+            setTimeout(() => {
+              const latestState = useMindMapStore.getState();
+              const nodeDims: Record<string, { w: number; h: number }> = {};
+              latestState.nodes.forEach((n) => {
+                const el = nodeRefs.current[n.id];
+                nodeDims[n.id] = {
+                  w: el ? el.offsetWidth : n.width,
+                  h: el ? el.offsetHeight : n.height,
+                };
+              });
+              latestState.autoLayout(nodeDims);
+            }, 50);
           }
         }
       }

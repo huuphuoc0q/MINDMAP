@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useMindMapStore } from '../store/useMindMapStore';
 import { buildLinearTree, indentNodeInGraph, outdentNodeInGraph, insertNodeGraph } from '../utils/outlinerUtils';
 import { OutlinerRow } from './OutlinerRow';
-import { Bold, Italic, Underline, Highlighter } from 'lucide-react';
+import { Bold, Italic, Underline, List, ListOrdered } from 'lucide-react';
 
 export const OutlinerPanel: React.FC = () => {
   const nodes = useMindMapStore(state => state.nodes);
@@ -13,6 +13,7 @@ export const OutlinerPanel: React.FC = () => {
 
   const [activeNodeId, setActiveNodeId] = useState<string | null>(null);
   const [localCollapsed, setLocalCollapsed] = useState<Set<string>>(new Set());
+  const [showListMenu, setShowListMenu] = useState(false);
 
   // Derive the tree whenever nodes or connections change
   const linearTree = useMemo(() => {
@@ -163,7 +164,22 @@ export const OutlinerPanel: React.FC = () => {
       return;
     }
 
-    document.execCommand(command, false, value);
+    if (command === 'insertAlphabeticalList') {
+      document.execCommand('insertOrderedList', false, value);
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        let node = selection.getRangeAt(0).startContainer;
+        while (node && node !== document.body) {
+          if (node.nodeName === 'OL') {
+            (node as HTMLOListElement).setAttribute('type', 'a');
+            break;
+          }
+          node = node.parentNode!;
+        }
+      }
+    } else {
+      document.execCommand(command, false, value);
+    }
 
     // Trigger onChange for formatting commands too
     if (activeNodeId) {
@@ -244,9 +260,46 @@ export const OutlinerPanel: React.FC = () => {
           <Underline size={18} />
         </button>
         <div className="w-px h-6 bg-white/10 mx-2" />
-        <button onMouseDown={(e) => { e.preventDefault(); applyFormat('highlight'); }} className="w-10 h-10 flex items-center justify-center text-orange-400 hover:text-orange-300 hover:bg-orange-500/10 rounded-xl transition-all" title="Highlight màu Cam (Ctrl+E)">
-          <Highlighter size={18} />
-        </button>
+        
+        <div className="relative">
+          <button
+            onMouseDown={(e) => {
+              e.preventDefault();
+              setShowListMenu(!showListMenu);
+            }}
+            className={`w-10 h-10 flex items-center justify-center rounded-xl transition-all cursor-pointer ${
+              showListMenu 
+                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
+                : 'text-white/80 hover:text-white hover:bg-white/10'
+            }`}
+            title="Đánh danh sách nội dung"
+          >
+            <List size={18} />
+          </button>
+
+          {showListMenu && (
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-3 p-2 bg-[#12141A]/95 backdrop-blur-xl border border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.5)] rounded-xl flex flex-col gap-1 w-48 z-50 animate-fade-in">
+              {[
+                { id: 'insertUnorderedList', label: 'Danh sách Chấm tròn (•)', icon: <List size={14} className="text-emerald-400" /> },
+                { id: 'insertOrderedList', label: 'Danh sách Số (1.)', icon: <ListOrdered size={14} className="text-purple-400" /> },
+                { id: 'insertAlphabeticalList', label: 'Danh sách Chữ cái (a.)', icon: <ListOrdered size={14} className="text-pink-400" /> },
+              ].map((style) => (
+                <button
+                  key={style.id}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    applyFormat(style.id);
+                    setShowListMenu(false);
+                  }}
+                  className="flex items-center gap-2.5 px-3 py-2 text-xs text-left text-white/60 hover:text-white hover:bg-white/5 rounded-lg transition-all cursor-pointer"
+                >
+                  {style.icon}
+                  <span>{style.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -2,6 +2,63 @@ import React, { useRef, useEffect, useState } from 'react';
 import { LinearNode } from '../utils/outlinerUtils';
 import { Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 
+const handleSpaceAutoList = (element: HTMLElement): boolean => {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return false;
+  
+  const range = selection.getRangeAt(0);
+  const container = range.startContainer;
+  
+  const text = container.textContent || '';
+  const caretOffset = range.startOffset;
+  const textBeforeCaret = text.slice(0, caretOffset);
+  
+  const bulletMatch = textBeforeCaret.match(/^[\-\*•]$/);
+  const numberMatch = textBeforeCaret.match(/^1\.$/);
+  const alphaMatch = textBeforeCaret.match(/^[a-z]\.$/);
+  
+  if (bulletMatch || numberMatch || alphaMatch) {
+    // Select the prefix text
+    const newRange = document.createRange();
+    newRange.setStart(container, 0);
+    newRange.setEnd(container, caretOffset);
+    selection.removeAllRanges();
+    selection.addRange(newRange);
+    
+    // Delete it
+    document.execCommand('delete', false);
+    
+    // Trigger formatting
+    if (bulletMatch) {
+      document.execCommand('insertUnorderedList', false);
+    } else {
+      document.execCommand('insertOrderedList', false);
+      
+      if (alphaMatch) {
+        setTimeout(() => {
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            let node = sel.getRangeAt(0).startContainer;
+            while (node && node !== element) {
+              if (node.nodeName === 'OL') {
+                (node as HTMLOListElement).setAttribute('type', 'a');
+                break;
+              }
+              node = node.parentNode!;
+            }
+          }
+          // Ensure all OL lists within the element are styled alphabetically
+          element.querySelectorAll('ol').forEach(ol => {
+            ol.setAttribute('type', 'a');
+          });
+        }, 10);
+      }
+    }
+    return true;
+  }
+  return false;
+};
+
 interface OutlinerRowProps {
   item: LinearNode;
   isActive: boolean;
@@ -265,9 +322,40 @@ export const OutlinerRow: React.FC<OutlinerRowProps> = ({ item, isActive, hasChi
             onInput={handleInput}
             onFocus={() => onFocus(node.id)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                onKeyDown(e, node.id);
+              if (e.key === ' ') {
+                const handled = handleSpaceAutoList(e.currentTarget);
+                if (handled) {
+                  e.preventDefault();
+                  setTimeout(() => {
+                    onChange(node.id, e.currentTarget.innerHTML);
+                  }, 20);
+                }
+              } else if (e.key === 'Enter' && !e.shiftKey) {
+                // Check if selection is currently inside a list item (LI) element
+                const selection = window.getSelection();
+                let isInLI = false;
+                if (selection && selection.rangeCount > 0) {
+                  let selNode: Node | null = selection.getRangeAt(0).startContainer;
+                  while (selNode && selNode !== e.currentTarget) {
+                    if (selNode.nodeName === 'LI') {
+                      isInLI = true;
+                      break;
+                    }
+                    selNode = selNode.parentNode;
+                  }
+                }
+
+                if (isInLI) {
+                  // Let browser handle LI enter key natively (creates new LI in the same list).
+                  // Sync changes to store after DOM updates.
+                  setTimeout(() => {
+                    onChange(node.id, e.currentTarget.innerHTML);
+                  }, 20);
+                } else {
+                  // Standard behavior: create a new sibling Outliner row node
+                  e.preventDefault();
+                  onKeyDown(e, node.id);
+                }
               } else if (e.key === 'Tab' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                 onKeyDown(e, node.id);
               } else if ((e.ctrlKey || e.metaKey) && e.key === 'b') {

@@ -1,6 +1,63 @@
 import React, { useRef, useEffect, forwardRef, memo } from 'react';
 import { MindNodeData } from '../types';
 
+const handleSpaceAutoList = (element: HTMLElement): boolean => {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return false;
+  
+  const range = selection.getRangeAt(0);
+  const container = range.startContainer;
+  
+  const text = container.textContent || '';
+  const caretOffset = range.startOffset;
+  const textBeforeCaret = text.slice(0, caretOffset);
+  
+  const bulletMatch = textBeforeCaret.match(/^[\-\*•]$/);
+  const numberMatch = textBeforeCaret.match(/^1\.$/);
+  const alphaMatch = textBeforeCaret.match(/^[a-z]\.$/);
+  
+  if (bulletMatch || numberMatch || alphaMatch) {
+    // Select the prefix text
+    const newRange = document.createRange();
+    newRange.setStart(container, 0);
+    newRange.setEnd(container, caretOffset);
+    selection.removeAllRanges();
+    selection.addRange(newRange);
+    
+    // Delete it
+    document.execCommand('delete', false);
+    
+    // Trigger formatting
+    if (bulletMatch) {
+      document.execCommand('insertUnorderedList', false);
+    } else {
+      document.execCommand('insertOrderedList', false);
+      
+      if (alphaMatch) {
+        setTimeout(() => {
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            let node = sel.getRangeAt(0).startContainer;
+            while (node && node !== element) {
+              if (node.nodeName === 'OL') {
+                (node as HTMLOListElement).setAttribute('type', 'a');
+                break;
+              }
+              node = node.parentNode!;
+            }
+          }
+          // Ensure all OL lists within the canvas editor node are styled alphabetically
+          element.querySelectorAll('ol').forEach(ol => {
+            ol.setAttribute('type', 'a');
+          });
+        }, 10);
+      }
+    }
+    return true;
+  }
+  return false;
+};
+
 interface EditorNodeProps {
   node: MindNodeData;
   level: number;
@@ -409,8 +466,19 @@ export const EditorNode = memo(forwardRef<HTMLDivElement, EditorNodeProps>(({
           cursor: isEditing ? 'text' : 'auto'
         }}
         onKeyDown={(e) => {
+          if (e.key === ' ') {
+            const handled = handleSpaceAutoList(e.currentTarget);
+            if (handled) {
+              e.preventDefault();
+              setTimeout(() => {
+                if (contentRef.current) {
+                  onChange(node.id, contentRef.current.innerHTML);
+                }
+              }, 20);
+            }
+          }
           // Bắt phím tắt Ctrl+B để in đậm thông thường
-          if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+          else if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
             e.preventDefault();
             document.execCommand('bold', false);
           }
